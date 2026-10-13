@@ -1,14 +1,14 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
-import { ChevronRight, Sparkles, Trophy } from "lucide-react";
+import { CalendarCheck, ChevronRight, Sparkles, Trophy } from "lucide-react";
 import { getProfile } from "@/services/profile";
 import { getQuests, getUnlockedAchievements, reconcile } from "@/services/progression";
 import { loadHabitCompletions, loadHabits, loadRecipes, loadRoutineCompletions, loadRoutines } from "@/services/loaders";
 import { computeHabitStats } from "@/ranking/domains/habits";
 import { getOuraStatus } from "@/integrations/oura/sync";
 import { xpBetween } from "@/services/xp";
-import { startOfWeek, formatLong, dateInTz } from "@/lib/dates";
+import { startOfWeek, formatLong, dateInTz, weekday } from "@/lib/dates";
 import { CharacterCard } from "@/components/home/CharacterCard";
 import { TodayChecklist, type ChecklistItem } from "@/components/home/TodayChecklist";
 import { DomainGrid } from "@/components/home/DomainGrid";
@@ -111,6 +111,17 @@ export default async function HomePage() {
       )}
 
       <TodayChecklist items={checklist} today={today} />
+
+      {weekday(today) <= 2 && weekday(today) >= 1 && startOfWeek(today) !== dateInTz(new Date(profile.onboardingCompletedAt ?? ""), profile.timezone) && (
+        <Link href="/progress/review" className="press flex items-center gap-3 rounded-xl border border-gold/30 bg-gold/8 px-4 py-3">
+          <CalendarCheck size={16} className="shrink-0 text-gold" />
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-medium">Last week&apos;s review is ready</div>
+            <div className="text-xs text-muted">What moved, what slipped, what to focus on.</div>
+          </div>
+          <ChevronRight size={16} className="text-faint" />
+        </Link>
+      )}
 
       <section>
         <SectionTitle

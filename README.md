@@ -94,6 +94,6 @@ Everything lives in `data/ascend.db` on the machine running the app. Financial f
 ## Testing
 
 ```bash
-npm test          # 46 tests: anchors, rank mapping, gating, levels, each domain scorer, XP ledger, quests, achievements
+npm test          # 49 tests: anchors, rank mapping, gating, levels, each domain scorer, XP ledger, quests, achievements
 npm run typecheck
 ```

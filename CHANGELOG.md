@@ -27,5 +27,5 @@ Initial build of Ascend, a mobile-first self-improvement RPG.
 
 ### Docs & tests
 * `docs/ranking-research.md` (sources per domain), `docs/ranking-methodology.md`, `docs/oura-integration.md`, README with setup and env vars.
-* 46 Vitest tests covering scale helpers, rank mapping, gating, levels, every domain scorer, the overall engine, the XP ledger and the reconcile loop.
+* 49 Vitest tests covering scale helpers, rank mapping, gating, levels, every domain scorer, the overall engine, the XP ledger and the reconcile loop.
 * `npm run db:seed` demo data generator.

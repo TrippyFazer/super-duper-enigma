@@ -119,7 +119,7 @@ export const QUEST_TEMPLATES: QuestTemplate[] = [
     domain: "fitness",
     applies: (c) => has(c, "fitness"),
     build: (c) => {
-      const n = Math.min(6, Math.max(2, Math.round(c.fitness.avgSessionsLast4Weeks) + (c.fitness.avgSessionsLast4Weeks >= 2 ? 1 : 0)));
+      const n = Math.min(6, Math.max(2, Math.floor(c.fitness.avgSessionsLast4Weeks) + 1));
       return { title: `Train ${n} times this week`, description: "Consistency is the whole game.", target: n, rewardXp: 100 };
     },
     progress: (c) => c.fitness.sessionsThisWeek,
@@ -131,7 +131,7 @@ export const QUEST_TEMPLATES: QuestTemplate[] = [
     domain: "cooking",
     applies: (c) => has(c, "cooking"),
     build: (c) => {
-      const n = Math.min(14, Math.max(3, Math.round(Math.max(c.cooking.avgMealsLast4Weeks + 1, c.cooking.target))));
+      const n = Math.min(14, Math.max(3, Math.floor(Math.max(c.cooking.avgMealsLast4Weeks, c.cooking.target - 1)) + 1));
       return { title: `Cook ${n} meals this week`, description: "Become someone who can feed themselves well.", target: n, rewardXp: 75 };
     },
     progress: (c) => c.cooking.mealsThisWeek,
