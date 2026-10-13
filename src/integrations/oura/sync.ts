@@ -150,8 +150,8 @@ export function applyOuraData(data: OuraFetchResult, sleepTargetMin: number, ste
       .values(row)
       .onConflictDoUpdate({ target: sleepEntries.date, set: row })
       .run();
-    awardXp("sleep_logged", day);
-    if (total >= sleepTargetMin) awardXp("sleep_target", day);
+    awardXp("sleep_logged", day, { source: { type: "sleep", id: day } });
+    if (total >= sleepTargetMin) awardXp("sleep_target", day, { source: { type: "sleep", id: day } });
     nights++;
   }
 
@@ -163,7 +163,7 @@ export function applyOuraData(data: OuraFetchResult, sleepTargetMin: number, ste
       .values({ date: a.day, steps: a.steps, activeMinutes, activityScore: a.score ?? null, source: "oura" })
       .onConflictDoUpdate({ target: dailyActivity.date, set: { steps: a.steps, activeMinutes, activityScore: a.score ?? null, source: "oura" } })
       .run();
-    if (a.steps >= stepsTarget) awardXp("steps_target", a.day);
+    if (a.steps >= stepsTarget) awardXp("steps_target", a.day, { source: { type: "steps", id: a.day } });
     activityDays++;
   }
   return { nights, activityDays };

@@ -11,7 +11,7 @@ export default async function SessionPage({ searchParams }: { searchParams: Prom
   if (!profile.onboarded) redirect("/onboarding");
   const sp = await searchParams;
   const s = sp.id ? getSession(Number(sp.id)) : getActiveSession();
-  if (!s || s.status !== "active") redirect("/planner/workout");
+  if (!s || (s.status !== "active" && s.status !== "paused")) redirect("/planner/workout");
   return (
     <SessionTracker
       session={{
@@ -19,6 +19,9 @@ export default async function SessionPage({ searchParams }: { searchParams: Prom
         name: s.name,
         focus: s.focus,
         startedAt: s.startedAt,
+        status: s.status,
+        pausedAt: s.pausedAt,
+        pausedSec: s.pausedSec,
         exercises: s.exercises.map((e) => ({ id: e.id, slug: e.slug, name: e.name, targetSets: e.targetSets, targetReps: e.targetReps, restSeconds: e.restSeconds, status: e.status, notes: e.notes, sets: e.sets.map((x) => ({ id: x.id, setIndex: x.setIndex, weight: x.weight, reps: x.reps, completed: x.completed })), previous: e.previous })),
       }}
     />

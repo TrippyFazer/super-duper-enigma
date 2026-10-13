@@ -10,6 +10,9 @@ import { QuickLog } from "@/components/log/QuickLog";
 import { SleepChart, DayHeatmap } from "@/components/charts/Charts";
 import { Card, SectionTitle, Stat } from "@/components/ui/primitives";
 import { OuraSyncButton } from "./OuraSyncButton";
+import { DeleteButton } from "./DeleteButton";
+import { SleepScheduleCard } from "@/components/sleep/SleepScheduleCard";
+import { compareNight, computeSleepSchedule } from "@/services/sleepPlan";
 
 function clock(iso: string | null | undefined): number | null {
   const m = iso?.match(/T(\d{2}):(\d{2})/);
@@ -35,8 +38,12 @@ export function SleepView({ profile, range }: { profile: ProfileView; assessment
     return { date: d, value: e ? Math.min(1, e.totalSleepMin / 540) : null, label: e ? formatMinutes(e.totalSleepMin) : "no data" };
   });
 
+  const sched = computeSleepSchedule(profile.targets, profile.preferences.sleep);
+  const lastEntry = entries.find((e) => e.date === today) ?? entries.find((e) => e.date === days[days.length - 2]) ?? null;
+  const lastVs = sched && lastEntry ? compareNight(lastEntry, sched) : null;
   return (
     <div className="space-y-4">
+      <SleepScheduleCard sched={sched} lastNight={lastVs} />
       {oura.connected && oura.enabled ? (
         <div className="card flex items-center gap-3 px-4 py-3">
           <Watch size={18} className="text-gold" />
@@ -93,6 +100,7 @@ export function SleepView({ profile, range }: { profile: ProfileView; assessment
                   {e.efficiency != null ? ` · ${e.efficiency}% eff.` : ""}
                 </span>
                 <span className="text-[10px] uppercase tracking-wide text-faint">{e.source}</span>
+                <DeleteButton kind="sleep" id={e.date} confirm="Delete this night? Sleep XP for it is reversed." />
               </li>
             ))}
           </ul>

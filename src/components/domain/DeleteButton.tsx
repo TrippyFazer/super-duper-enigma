@@ -2,10 +2,11 @@
 
 import { useTransition } from "react";
 import { Trash2 } from "lucide-react";
-import { deleteWorkoutAction, deleteMealAction, deleteFinancialSnapshotAction, deleteHabitAction, deleteRoutineAction, deleteSobrietyTrackerAction } from "@/actions";
+import { deleteWorkoutAction, deleteMealAction, deleteFinancialSnapshotAction, deleteHabitAction, deleteRoutineAction, deleteSobrietyTrackerAction, deleteSleepAction } from "@/actions";
 
 const ACTIONS = {
   workout: deleteWorkoutAction,
+  sleep: (id: number | string) => deleteSleepAction(String(id)),
   meal: deleteMealAction,
   snapshot: deleteFinancialSnapshotAction,
   habit: deleteHabitAction,
@@ -13,7 +14,7 @@ const ACTIONS = {
   tracker: deleteSobrietyTrackerAction,
 } as const;
 
-export function DeleteButton({ kind, id, confirm = "Delete this entry?" }: { kind: keyof typeof ACTIONS; id: number; confirm?: string }) {
+export function DeleteButton({ kind, id, confirm = "Delete this entry? Any XP it earned is reversed." }: { kind: keyof typeof ACTIONS; id: number | string; confirm?: string }) {
   const [pending, start] = useTransition();
   return (
     <button
@@ -23,7 +24,7 @@ export function DeleteButton({ kind, id, confirm = "Delete this entry?" }: { kin
       onClick={() => {
         if (!window.confirm(confirm)) return;
         start(async () => {
-          await ACTIONS[kind](id);
+          await (ACTIONS[kind] as (id: number | string) => Promise<unknown>)(id);
         });
       }}
       className="press flex h-8 w-8 items-center justify-center rounded-full text-faint hover:bg-danger/15 hover:text-danger disabled:opacity-40"

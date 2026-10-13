@@ -7,6 +7,8 @@ import { DOMAIN_IDS } from "@/ranking/types";
 import * as m from "@/services/mutations";
 import { getProfile, updateProfile } from "@/services/profile";
 import { reconcile } from "@/services/progression";
+import { addReason } from "@/services/motivation";
+import { computeSleepSchedule } from "@/services/sleepPlan";
 import { syncOura, saveOuraToken, disconnectOura } from "@/integrations/oura/sync";
 import { recordEvent } from "@/services/progression";
 import { awardXp } from "@/services/xp";
@@ -99,6 +101,11 @@ export async function logSleepAction(input: z.input<typeof sleepSchema>): Promis
   } catch (e) {
     return fail(e);
   }
+}
+
+export async function deleteSleepAction(date: string) {
+  m.deleteSleep(dateSchema.parse(date));
+  await touch();
 }
 
 // ------------------------------------------------------------------ Cooking
@@ -292,8 +299,10 @@ const onboardingSchema = z.object({
       fitness: z.object({ goal: z.enum(["general", "strength", "muscle", "fat-loss", "conditioning", "athleticism", "hybrid"]), experience: z.enum(["beginner", "intermediate", "advanced"]), daysPerWeek: z.coerce.number().int().min(1).max(7), equipment: z.array(z.enum(["barbell", "dumbbell", "cable", "machine", "bodyweight", "kettlebell", "band", "cardio-machine"])), workoutLengthMin: z.coerce.number().int().min(15).max(120), injuries: z.string().max(300).optional(), preferences: z.string().max(300).optional() }).partial().optional(),
       nutrition: z.object({ goal: z.enum(["maintain", "lose", "gain", "recomp"]), calorieTarget: z.coerce.number().int().min(800).max(6000).nullable(), proteinTarget: z.coerce.number().int().min(20).max(400).nullable(), dietPrefs: z.array(z.string().max(30)), dislikes: z.array(z.string().max(40)), likes: z.array(z.string().max(40)).optional(), mealsPerDay: z.coerce.number().int().min(2).max(6).optional() }).partial().optional(),
       questFrequency: z.enum(["low", "normal", "high"]).optional(),
+      sleep: z.object({ wakeTarget: z.string().regex(/^\d{2}:\d{2}$/).nullable().optional() }).optional(),
     })
     .optional(),
+  reasons: z.array(z.string().trim().min(3).max(160)).max(10).optional(),
 });
 export type OnboardingInput = z.input<typeof onboardingSchema>;
 
@@ -320,8 +329,14 @@ export async function completeOnboardingAction(input: OnboardingInput): Promise<
     if (s.routines?.evening?.length) m.createRoutine({ name: "Evening routine", timeOfDay: "evening", steps: s.routines.evening });
     for (const t of s.sobriety ?? []) m.createSobrietyTracker(t);
     for (const h of s.habits ?? []) m.createHabit({ name: h, scheduleType: "daily" });
+    for (const r of s.reasons ?? []) addReason(r);
+    if (s.preferences?.sleep?.wakeTarget) {
+      const p0 = getProfile();
+      const sched = computeSleepSchedule(p0.targets, { ...p0.preferences.sleep, wakeTarget: s.preferences.sleep.wakeTarget });
+      if (sched) updateProfile({ targets: { bedtimeTarget: sched.inBed } });
+    }
     const profile = getProfile();
-    const xp = awardXp("onboarding", profile.today);
+    const xp = awardXp("onboarding", profile.today, { source: { type: "system", id: "onboarding" } });
     return finish(xp.awarded ? [`Character created +${xp.amount}`] : [], xp.amount);
   } catch (e) {
     return fail(e);

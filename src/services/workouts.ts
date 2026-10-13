@@ -7,7 +7,7 @@ import { estimate1RM, findExercise, slugify, type MuscleGroup } from "@/planner/
 import { focusMuscles, type GeneratedPlan, type PlanExercise, type RecentSessionSummary } from "@/planner/workoutTemplates";
 import { PR_XP } from "@/ranking/xp";
 import { recordEvent } from "./events";
-import { awardXp, type XpAward } from "./xp";
+import { awardXp, voidXpForSource, type XpAward } from "./xp";
 
 // ---------------------------------------------------------------- plans ----
 export function getPlanForDate(date: ISODate): (WorkoutPlan & { exercisesParsed: PlanExercise[]; bonusParsed: GeneratedPlan["bonus"] }) | null {
@@ -52,7 +52,7 @@ export interface SessionView extends WorkoutSession {
 }
 
 export function getActiveSession(): SessionView | null {
-  const row = getDb().select().from(workoutSessions).where(eq(workoutSessions.status, "active")).orderBy(desc(workoutSessions.id)).get();
+  const row = getDb().select().from(workoutSessions).where(inArray(workoutSessions.status, ["active", "paused"])).orderBy(desc(workoutSessions.id)).get();
   return row ? getSession(row.id) : null;
 }
 
@@ -186,15 +186,17 @@ export interface FinishResult {
 export function finishSession(id: number, opts: { notes?: string | null; intensity?: number } = {}): FinishResult | null {
   const db = getDb();
   const s = getSession(id);
-  if (!s || s.status !== "active") return null;
+  if (!s || (s.status !== "active" && s.status !== "paused")) return null;
   const completedSets = s.exercises.flatMap((e) => e.sets).filter((x) => x.completed).length;
   const now = new Date();
-  const durationMin = Math.max(5, Math.min(240, Math.round((now.getTime() - new Date(s.startedAt).getTime()) / 60000)));
+  const pausedSec = s.pausedSec + (s.pausedAt ? Math.max(0, (now.getTime() - new Date(s.pausedAt).getTime()) / 1000) : 0);
+  const durationMin = Math.max(1, Math.min(240, Math.round((now.getTime() - new Date(s.startedAt).getTime()) / 60000 - pausedSec / 60)));
 
   if (completedSets === 0) {
-    db.update(workoutSessions).set({ status: "abandoned", finishedAt: now.toISOString(), durationMin, notes: opts.notes ?? null }).where(eq(workoutSessions.id, id)).run();
+    // Nothing happened: this is a cancel, not a workout. No log row, no XP.
+    db.update(workoutSessions).set({ status: "cancelled", finishedAt: now.toISOString(), durationMin, notes: opts.notes ?? null, pausedAt: null, pausedSec: Math.round(pausedSec) }).where(eq(workoutSessions.id, id)).run();
     if (s.planId) db.update(workoutPlans).set({ status: "planned" }).where(eq(workoutPlans.id, s.planId)).run();
-    return { session: { ...s, status: "abandoned" }, xp: [], prs: [], completedSets: 0 };
+    return { session: { ...s, status: "cancelled" }, xp: [], prs: [], completedSets: 0 };
   }
 
   const isCardio = s.focus === "conditioning" || s.focus === "recovery";
@@ -203,14 +205,18 @@ export function finishSession(id: number, opts: { notes?: string | null; intensi
     .values({ date: s.date, type: isCardio ? (s.focus === "recovery" ? "mobility" : "cardio") : "strength", durationMin, intensity: opts.intensity ?? (s.focus === "recovery" ? 1 : 2), notes: opts.notes ?? `${s.name} · ${completedSets} sets`, source: "session" })
     .returning({ id: workouts.id })
     .get();
-  db.update(workoutSessions).set({ status: "completed", finishedAt: now.toISOString(), durationMin, notes: opts.notes ?? null, workoutId: w.id }).where(eq(workoutSessions.id, id)).run();
+  db.update(workoutSessions).set({ status: "completed", finishedAt: now.toISOString(), durationMin, notes: opts.notes ?? null, workoutId: w.id, pausedAt: null, pausedSec: Math.round(pausedSec) }).where(eq(workoutSessions.id, id)).run();
   if (s.planId) db.update(workoutPlans).set({ status: "completed" }).where(eq(workoutPlans.id, s.planId)).run();
 
+  const src = { type: "session" as const, id };
   const xp: XpAward[] = [];
   const push = (a: XpAward) => a.awarded && xp.push(a);
-  push(awardXp("workout", s.date, { suffix: `s${w.id}` }));
-  if (durationMin >= 45) push(awardXp("workout_long", s.date));
-  push(awardXp("workout_session", s.date));
+  // Partial credit: a short session with a few sets still logs a workout, but the
+  // "workout" rule needs 10+ minutes or 3+ sets to be worth XP (end-early is honest, tapping finish immediately is not).
+  const qualifies = durationMin >= 10 || completedSets >= 3;
+  if (qualifies) push(awardXp("workout", s.date, { suffix: `s${w.id}`, source: src }));
+  if (durationMin >= 45) push(awardXp("workout_long", s.date, { source: src }));
+  if (qualifies) push(awardXp("workout_session", s.date, { source: src }));
 
   // Personal records (weight-based exercises only, reps 1–12 to avoid rewarding junk).
   const prs: FinishResult["prs"] = [];
@@ -230,7 +236,7 @@ export function finishSession(id: number, opts: { notes?: string | null; intensi
             .run();
           // The first-ever record for a movement is a baseline, not a PR.
           if (existedBefore && !prs.some((p) => p.exerciseName === ex.name && p.kind === kind)) {
-            const a = awardXp("personal_record", s.date, { suffix: `${ex.slug}:${kind}`, amount: PR_XP[kind] ?? 40, description: `PR: ${ex.name} ${kind === "weight" ? `${set.weight}×${set.reps}` : `e1RM ${value}`}` });
+            const a = awardXp("personal_record", s.date, { suffix: `${ex.slug}:${kind}`, amount: PR_XP[kind] ?? 40, description: `PR: ${ex.name} ${kind === "weight" ? `${set.weight}×${set.reps}` : `e1RM ${value}`}`, source: src });
             prs.push({ exerciseName: ex.name, kind, value, weight: set.weight, reps: set.reps, xp: a.awarded ? a.amount : 0 });
             if (a.awarded) xp.push(a);
             recordEvent({ type: "milestone", key: `pr:${ex.slug}:${kind}:${s.date}`, title: `New personal record: ${ex.name}`, description: kind === "weight" ? `${set.weight} × ${set.reps}` : `Estimated 1RM ${value}`, domain: "fitness" });
@@ -242,12 +248,87 @@ export function finishSession(id: number, opts: { notes?: string | null; intensi
   return { session: db.select().from(workoutSessions).where(eq(workoutSessions.id, id)).get()!, xp, prs, completedSets };
 }
 
-export function abandonSession(id: number) {
+/** Cancel an in-progress session: it did not meaningfully happen. Row kept as "cancelled" (discardable), no log, no XP. */
+export function cancelSession(id: number) {
   const db = getDb();
   const s = db.select().from(workoutSessions).where(eq(workoutSessions.id, id)).get();
   if (!s) return;
-  db.update(workoutSessions).set({ status: "abandoned", finishedAt: new Date().toISOString() }).where(eq(workoutSessions.id, id)).run();
+  db.update(workoutSessions).set({ status: "cancelled", finishedAt: new Date().toISOString(), pausedAt: null }).where(eq(workoutSessions.id, id)).run();
   if (s.planId) db.update(workoutPlans).set({ status: "planned" }).where(eq(workoutPlans.id, s.planId)).run();
+}
+/** @deprecated alias kept for older callers */
+export const abandonSession = cancelSession;
+
+export function pauseSession(id: number) {
+  const db = getDb();
+  const s = db.select().from(workoutSessions).where(eq(workoutSessions.id, id)).get();
+  if (!s || s.status !== "active") return;
+  db.update(workoutSessions).set({ status: "paused", pausedAt: new Date().toISOString() }).where(eq(workoutSessions.id, id)).run();
+}
+
+export function resumeSession(id: number) {
+  const db = getDb();
+  const s = db.select().from(workoutSessions).where(eq(workoutSessions.id, id)).get();
+  if (!s || s.status !== "paused") return;
+  const extra = s.pausedAt ? Math.max(0, Math.round((Date.now() - new Date(s.pausedAt).getTime()) / 1000)) : 0;
+  db.update(workoutSessions).set({ status: "active", pausedAt: null, pausedSec: s.pausedSec + extra }).where(eq(workoutSessions.id, id)).run();
+}
+
+/**
+ * Discard a session entirely (accidental start, wrong entry). Removes the session,
+ * its fitness log row, voids every XP it earned, and recomputes personal records
+ * for the lifts it touched. Nothing about it remains in history. Returns voided XP.
+ */
+export function discardSession(id: number): { voidedXp: number; removedWorkout: boolean } {
+  const db = getDb();
+  const s = db.select().from(workoutSessions).where(eq(workoutSessions.id, id)).get();
+  if (!s) return { voidedXp: 0, removedWorkout: false };
+  const slugs = db.select({ slug: sessionExercises.slug }).from(sessionExercises).where(eq(sessionExercises.sessionId, id)).all().map((x) => x.slug);
+  const voidedXp = voidXpForSource({ type: "session", id }, "session discarded");
+  let removedWorkout = false;
+  if (s.workoutId) {
+    voidXpForSource({ type: "workout", id: s.workoutId }, "session discarded");
+    db.delete(workouts).where(eq(workouts.id, s.workoutId)).run();
+    removedWorkout = true;
+  }
+  if (s.planId && s.status !== "completed") db.update(workoutPlans).set({ status: "planned" }).where(eq(workoutPlans.id, s.planId)).run();
+  if (s.planId && s.status === "completed") db.update(workoutPlans).set({ status: "planned" }).where(eq(workoutPlans.id, s.planId)).run();
+  db.delete(workoutSessions).where(eq(workoutSessions.id, id)).run(); // cascades exercises + sets
+  for (const slug of new Set(slugs)) recomputeRecords(slug);
+  return { voidedXp, removedWorkout };
+}
+
+/** Rebuild weight / e1RM records for a lift from the remaining completed sessions. */
+export function recomputeRecords(slug: string) {
+  const db = getDb();
+  const rows = db
+    .select({ seId: sessionExercises.id, sessionId: sessionExercises.sessionId, name: sessionExercises.name, date: workoutSessions.date })
+    .from(sessionExercises)
+    .innerJoin(workoutSessions, eq(sessionExercises.sessionId, workoutSessions.id))
+    .where(and(eq(sessionExercises.slug, slug), eq(workoutSessions.status, "completed")))
+    .all();
+  const best: Record<string, { value: number; weight: number; reps: number; date: string; sessionId: number; name: string } | null> = { weight: null, e1rm: null };
+  for (const r of rows) {
+    const sets = db.select().from(exerciseSets).where(and(eq(exerciseSets.sessionExerciseId, r.seId), eq(exerciseSets.completed, true))).all();
+    for (const set of sets) {
+      if (!set.weight || !set.reps || set.reps < 1 || set.reps > 12) continue;
+      const cands = { weight: set.weight, e1rm: estimate1RM(set.weight, set.reps) };
+      for (const kind of ["weight", "e1rm"] as const) {
+        if (!best[kind] || cands[kind] > best[kind]!.value) best[kind] = { value: cands[kind], weight: set.weight, reps: set.reps, date: r.date, sessionId: r.sessionId, name: r.name };
+      }
+    }
+  }
+  for (const kind of ["weight", "e1rm"] as const) {
+    const b = best[kind];
+    if (!b) {
+      db.delete(personalRecords).where(and(eq(personalRecords.exerciseSlug, slug), eq(personalRecords.kind, kind))).run();
+      continue;
+    }
+    db.insert(personalRecords)
+      .values({ exerciseSlug: slug, exerciseName: b.name, kind, value: b.value, weight: b.weight, reps: b.reps, date: b.date, sessionId: b.sessionId })
+      .onConflictDoUpdate({ target: [personalRecords.exerciseSlug, personalRecords.kind], set: { value: b.value, weight: b.weight, reps: b.reps, date: b.date, sessionId: b.sessionId, exerciseName: b.name } })
+      .run();
+  }
 }
 
 // ------------------------------------------------------------- history ----
@@ -269,7 +350,7 @@ export function listSessions(limit = 30): (WorkoutSession & { exerciseCount: num
   return db
     .select()
     .from(workoutSessions)
-    .where(inArray(workoutSessions.status, ["completed", "abandoned"]))
+    .where(inArray(workoutSessions.status, ["completed", "cancelled", "abandoned"]))
     .orderBy(desc(workoutSessions.id))
     .limit(limit)
     .all()

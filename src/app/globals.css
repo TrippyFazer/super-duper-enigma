@@ -142,6 +142,11 @@ textarea {
 }
 
 /* ---- Utilities ---------------------------------------------------------- */
+html {
+  scroll-padding-bottom: calc(var(--nav-height) + var(--safe-bottom) + 2rem);
+  scroll-padding-top: 4rem;
+}
+
 @utility page {
   padding-left: 1rem;
   padding-right: 1rem;

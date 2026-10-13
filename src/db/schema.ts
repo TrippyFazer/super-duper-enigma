@@ -274,9 +274,16 @@ export const xpEvents = sqliteTable(
     /** Unique idempotency key so the same action never awards twice */
     key: text("key").notNull(),
     description: text("description").notNull(),
+    /** What earned this XP, e.g. workout / session / nutrition / quest / achievement / habit / routine / offer */
+    sourceType: text("source_type"),
+    /** Id of the source row (string so dates and composite ids fit) */
+    sourceId: text("source_id"),
+    /** Set when the source was deleted/invalidated. Voided events never count toward totals. */
+    voidedAt: text("voided_at"),
+    voidReason: text("void_reason"),
     createdAt: text("created_at").notNull().default(now),
   },
-  (t) => [uniqueIndex("xp_events_key_uq").on(t.key), index("xp_events_date_idx").on(t.date)],
+  (t) => [uniqueIndex("xp_events_key_uq").on(t.key), index("xp_events_date_idx").on(t.date), index("xp_events_source_idx").on(t.sourceType, t.sourceId)],
 );
 
 export const quests = sqliteTable(
@@ -464,11 +471,14 @@ export const workoutSessions = sqliteTable(
     startedAt: text("started_at").notNull().default(now),
     finishedAt: text("finished_at"),
     durationMin: integer("duration_min"),
-    /** active | completed | abandoned */
+    /** active | paused | completed | cancelled | discarded  (abandoned = legacy alias of cancelled) */
     status: text("status").notNull().default("active"),
     notes: text("notes"),
     /** The fitness log row created when the session finishes */
     workoutId: integer("workout_id").references(() => workouts.id, { onDelete: "set null" }),
+    /** Pause bookkeeping: when the current pause started, and total seconds paused so far */
+    pausedAt: text("paused_at"),
+    pausedSec: integer("paused_sec").notNull().default(0),
   },
   (t) => [index("workout_sessions_date_idx").on(t.date)],
 );
@@ -564,9 +574,75 @@ export const nutritionEntries = sqliteTable(
     planMealIndex: integer("plan_meal_index"),
     /** Linked cooked-meal row when the food was home-cooked */
     mealId: integer("meal_id").references(() => meals.id, { onDelete: "set null" }),
+    /** Planned meal this entry fulfilled (eaten) */
+    plannedMealId: integer("planned_meal_id"),
+    savedFoodId: integer("saved_food_id"),
+    /** true when the numbers are an estimate (AI or rough manual) rather than label/verified data */
+    isEstimate: integer("is_estimate", { mode: "boolean" }).notNull().default(false),
+    /** restaurant / brand name for eating-out entries */
+    venue: text("venue"),
     createdAt: text("created_at").notNull().default(now),
   },
   (t) => [index("nutrition_entries_date_idx").on(t.date)],
+);
+
+/**
+ * Planned meals are rows (not JSON) so each one has a lifecycle:
+ * planned → prepared → eaten | skipped | replaced | discarded.
+ * Only *eaten* meals ever count toward nutrition totals (via nutrition_entries).
+ */
+export const plannedMeals = sqliteTable(
+  "planned_meals",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    date: text("date").notNull(),
+    /** Position within the day (0..n) */
+    slot: integer("slot").notNull().default(0),
+    mealType: text("meal_type").notNull().default("dinner"),
+    name: text("name").notNull(),
+    calories: integer("calories").notNull().default(0),
+    protein: integer("protein").notNull().default(0),
+    carbs: integer("carbs").notNull().default(0),
+    fat: integer("fat").notNull().default(0),
+    /** JSON string[] (ingredient names) or [{name, qty, unit}] */
+    ingredients: text("ingredients").notNull().default("[]"),
+    recipeId: integer("recipe_id").references(() => recipes.id, { onDelete: "set null" }),
+    notes: text("notes"),
+    prepMinutes: integer("prep_minutes"),
+    /** template | ai | manual | adjust */
+    source: text("source").notNull().default("template"),
+    /** planned | prepared | eaten | skipped | replaced | discarded */
+    status: text("status").notNull().default("planned"),
+    weekId: integer("week_id"),
+    nutritionEntryId: integer("nutrition_entry_id"),
+    /** Id of the meal that replaced this one (when status = replaced) */
+    replacedById: integer("replaced_by_id"),
+    statusChangedAt: text("status_changed_at"),
+    createdAt: text("created_at").notNull().default(now),
+  },
+  (t) => [index("planned_meals_date_idx").on(t.date), index("planned_meals_week_idx").on(t.weekId)],
+);
+
+/** Foods the user saves for one-tap logging (restaurant items, quick macros, verified products). */
+export const savedFoods = sqliteTable(
+  "saved_foods",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    name: text("name").notNull(),
+    brand: text("brand"),
+    servingDesc: text("serving_desc"),
+    calories: integer("calories").notNull(),
+    protein: integer("protein").notNull().default(0),
+    carbs: integer("carbs").notNull().default(0),
+    fat: integer("fat").notNull().default(0),
+    /** manual | restaurant | openfoodfacts | estimate | recipe */
+    source: text("source").notNull().default("manual"),
+    isEstimate: integer("is_estimate", { mode: "boolean" }).notNull().default(false),
+    useCount: integer("use_count").notNull().default(0),
+    lastUsedAt: text("last_used_at"),
+    createdAt: text("created_at").notNull().default(now),
+  },
+  (t) => [index("saved_foods_name_idx").on(t.name)],
 );
 
 // ---------------------------------------------------------------------------
@@ -612,3 +688,171 @@ export type PersonalRecord = typeof personalRecords.$inferSelect;
 export type MealPlan = typeof mealPlans.$inferSelect;
 export type NutritionEntry = typeof nutritionEntries.$inferSelect;
 export type Notification = typeof notifications.$inferSelect;
+
+// ---------------------------------------------------------------------------
+// Health samples (Apple Health / HealthKit via native bridge or Shortcut)
+// ---------------------------------------------------------------------------
+export const healthSamples = sqliteTable(
+  "health_samples",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    /** steps | active_energy | distance | exercise_minutes | stand_hours | sleep | resting_hr | heart_rate | hrv | body_mass | workout */
+    type: text("type").notNull(),
+    value: real("value").notNull(),
+    unit: text("unit").notNull().default(""),
+    startAt: text("start_at").notNull(),
+    endAt: text("end_at").notNull(),
+    /** HealthKit source name (e.g. "Oura", "Tripp's Apple Watch", "iPhone") */
+    sourceName: text("source_name").notNull().default("unknown"),
+    sourceBundle: text("source_bundle"),
+    device: text("device"),
+    /** HKObject UUID when provided; otherwise a hash of type+start+end+source */
+    uuid: text("uuid").notNull(),
+    /** JSON: sleep stage, workout activity type, etc. */
+    metadata: text("metadata").notNull().default("{}"),
+    ingestedAt: text("ingested_at").notNull().default(now),
+  },
+  (t) => [uniqueIndex("health_samples_uuid_uq").on(t.uuid), index("health_samples_type_start_idx").on(t.type, t.startAt)],
+);
+
+/** Workouts reported by Apple Health, kept separately so they can be linked to (not duplicated with) logged sessions. */
+export const healthWorkouts = sqliteTable(
+  "health_workouts",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    uuid: text("uuid").notNull(),
+    activityType: text("activity_type").notNull(),
+    startAt: text("start_at").notNull(),
+    endAt: text("end_at").notNull(),
+    durationMin: integer("duration_min").notNull(),
+    activeEnergyKcal: real("active_energy_kcal"),
+    distanceKm: real("distance_km"),
+    sourceName: text("source_name").notNull().default("unknown"),
+    date: text("date").notNull(),
+    /** Linked app workout row (manual log or finished session), when matched */
+    workoutId: integer("workout_id").references(() => workouts.id, { onDelete: "set null" }),
+    /** pending | linked | counted | ignored */
+    status: text("status").notNull().default("pending"),
+    /** A likely duplicate the user hasn't confirmed yet */
+    suggestedWorkoutId: integer("suggested_workout_id"),
+    createdAt: text("created_at").notNull().default(now),
+  },
+  (t) => [uniqueIndex("health_workouts_uuid_uq").on(t.uuid), index("health_workouts_date_idx").on(t.date)],
+);
+
+// ---------------------------------------------------------------------------
+// Motivation
+// ---------------------------------------------------------------------------
+export const motivationReasons = sqliteTable("motivation_reasons", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  text: text("text").notNull(),
+  active: integer("active", { mode: "boolean" }).notNull().default(true),
+  createdAt: text("created_at").notNull().default(now),
+});
+
+// ---------------------------------------------------------------------------
+// Weekly food planning: grocery weeks, shopping list, pantry, meal prep
+// ---------------------------------------------------------------------------
+export const groceryWeeks = sqliteTable(
+  "grocery_weeks",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    /** Monday of the week the food is for (shopping usually happens the Sunday before) */
+    weekStart: text("week_start").notNull(),
+    budget: real("budget").notNull().default(80),
+    /** budget | balanced | flexible */
+    budgetMode: text("budget_mode").notNull().default("balanced"),
+    calorieTarget: integer("calorie_target").notNull(),
+    proteinTarget: integer("protein_target").notNull(),
+    /** JSON {breakfast, lunch, dinner, snacks, eatingOut} */
+    mealsNeeded: text("meals_needed").notNull().default("{}"),
+    /** JSON {quickWeekdays, mealPrep, highProtein, reuseIngredients, notes} */
+    prefs: text("prefs").notNull().default("{}"),
+    /** planning | planned | shopped | reviewed */
+    status: text("status").notNull().default("planning"),
+    source: text("source").notNull().default("template"),
+    estimatedCost: real("estimated_cost"),
+    actualCost: real("actual_cost"),
+    /** JSON summary: reuse %, leftovers carried, rationale */
+    summary: text("summary").notNull().default("{}"),
+    shoppedAt: text("shopped_at"),
+    reviewedAt: text("reviewed_at"),
+    createdAt: text("created_at").notNull().default(now),
+  },
+  (t) => [uniqueIndex("grocery_weeks_start_uq").on(t.weekStart)],
+);
+
+export const groceryItems = sqliteTable(
+  "grocery_items",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    weekId: integer("week_id")
+      .notNull()
+      .references(() => groceryWeeks.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    /** produce | protein | dairy | grains | frozen | pantry | other */
+    category: text("category").notNull().default("other"),
+    qty: real("qty").notNull().default(1),
+    unit: text("unit").notNull().default("each"),
+    estPrice: real("est_price"),
+    actualQty: real("actual_qty"),
+    actualPrice: real("actual_price"),
+    purchased: integer("purchased", { mode: "boolean" }).notNull().default(false),
+    skipped: integer("skipped", { mode: "boolean" }).notNull().default(false),
+    /** JSON string[] meal names using this ingredient */
+    usedIn: text("used_in").notNull().default("[]"),
+    /** true when the item was not added (or reduced) because leftovers cover it */
+    coveredByPantry: integer("covered_by_pantry", { mode: "boolean" }).notNull().default(false),
+    note: text("note"),
+    createdAt: text("created_at").notNull().default(now),
+  },
+  (t) => [index("grocery_items_week_idx").on(t.weekId)],
+);
+
+export const pantryItems = sqliteTable(
+  "pantry_items",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    name: text("name").notNull(),
+    qty: real("qty"),
+    unit: text("unit").notNull().default("each"),
+    /** none | some | lot — coarse level used by the leftover review */
+    level: text("level"),
+    purchasedAt: text("purchased_at"),
+    expiresAt: text("expires_at"),
+    /** grocery | manual | leftover */
+    source: text("source").notNull().default("manual"),
+    updatedAt: text("updated_at").notNull().default(now),
+    createdAt: text("created_at").notNull().default(now),
+  },
+  (t) => [uniqueIndex("pantry_items_name_uq").on(t.name)],
+);
+
+export const mealPrepSessions = sqliteTable(
+  "meal_prep_sessions",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    weekId: integer("week_id").references(() => groceryWeeks.id, { onDelete: "cascade" }),
+    date: text("date").notNull(),
+    /** JSON [{name, servings, minutes}] */
+    items: text("items").notNull().default("[]"),
+    estimatedMinutes: integer("estimated_minutes").notNull().default(60),
+    /** JSON string[] recipe/meal names supported */
+    supports: text("supports").notNull().default("[]"),
+    /** planned | completed | skipped */
+    status: text("status").notNull().default("planned"),
+    completedAt: text("completed_at"),
+    createdAt: text("created_at").notNull().default(now),
+  },
+  (t) => [index("meal_prep_week_idx").on(t.weekId)],
+);
+
+export type PlannedMeal = typeof plannedMeals.$inferSelect;
+export type SavedFood = typeof savedFoods.$inferSelect;
+export type HealthSample = typeof healthSamples.$inferSelect;
+export type HealthWorkout = typeof healthWorkouts.$inferSelect;
+export type MotivationReason = typeof motivationReasons.$inferSelect;
+export type GroceryWeek = typeof groceryWeeks.$inferSelect;
+export type GroceryItem = typeof groceryItems.$inferSelect;
+export type PantryItem = typeof pantryItems.$inferSelect;
+export type MealPrepSession = typeof mealPrepSessions.$inferSelect;

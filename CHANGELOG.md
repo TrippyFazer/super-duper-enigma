@@ -1,5 +1,46 @@
 # Changelog
 
+## 0.3.0 — 2026-10-13 · "Real life is messy"
+
+Product-quality pass from beta testing: the app now separates **plan** from **reality**, and every record can be corrected.
+
+### Data correction & XP ledger
+* XP events carry a source (`sourceType`/`sourceId`); deleting or invalidating a source voids exactly its XP (audit trail kept, keys freed so the action can earn again). No phantom XP.
+* Reconcile reverts quests whose progress source disappeared and revokes achievements unlocked in the last 48 h whose condition no longer holds.
+* Delete / undo everywhere: workouts, sleep nights, meals, food entries, planned meals, habit checks, routine checks, special-quest completions, grocery items, pantry items, meal prep.
+
+### Workout lifecycle
+* Sessions have real states: active · paused · completed · cancelled · discarded. ⋯ menu offers Pause, End early (keeps completed sets, partial credit), Cancel workout (nothing happened) and Discard session (removed entirely, XP voided, records recomputed). History lists cancelled/empty sessions with Discard; quick-logged workouts can be deleted.
+* Finishing with zero sets never logs a workout; very short sessions log without XP.
+
+### Meal lifecycle
+* Planned meals are rows with status planned → prepared → eaten | skipped | replaced | discarded. Only *eaten* food counts. Ate this / Skip / Replace / Edit / Remove / "I didn't actually eat this", all reversible; regenerating keeps eaten history.
+* Eating out: Log food → Search (saved foods · 180+ chain menu items · your recipes · Open Food Facts), Restaurant, Quick macros (calories only mandatory), AI estimate (clearly labelled ESTIMATE, editable, only when no verified data), Recipe. Saved/common foods with one-tap recents. Logged food can replace the planned slot.
+* Smart day adjustment: after an unplanned meal the app *offers* to rebalance the rest of the day (AI or recipe/pantry template); nothing changes without Adjust.
+
+### Apple Health
+* `HealthProvider` abstraction + `AppleHealthProvider` fed by an iOS bridge (Shortcut automation or the native Swift bridge in `native/ios`). Ingest endpoint with token auth, idempotent samples with source/device/timestamps, overlapping-source de-duplication (no double-counted steps), nights from sleep stages, daily HRV/RHR, body mass → profile, workouts matched to logged sessions (confirm Same/Different) and otherwise counted for stats without XP. Manual entries always win.
+* Settings → Connected services: Connected / permissions / last sync / data available (✓ or — per metric, never fake zeros) / Sync now / Manage permissions / Rotate token / Disconnect. Oura direct sync kept as optional.
+* Home: Today's steps card with an evening walk quest offer for the remaining steps; Last night card with bed/wake/consistency.
+
+### Sleep planning, motivation, reminders
+* Target wake time → derived wind-down / in bed / asleep targets (editable), Tonight card, planned vs actual verdict per night.
+* "Why I'm doing this": personal reasons (onboarding + profile), used sparingly in morning messages with rotating templates (personal why, XP to next level, score deltas, streaks, first quest, short lines) that never repeat recently.
+* Scheduled reminders (independently switchable): morning motivation at wake time, wind-down (0/15/30/60/custom minutes before), workout reminder on training days, Sunday weekly planning, Sunday meal-prep, evening protein nudge.
+
+### Sunday weekly food planning
+* Weekly preparation (Sunday reset) stepper: Review → Leftovers → Budget/targets/meals needed/preferences → Generate week → Shopping list → Prep plan → Training days → Weekly quests → Next week ready.
+* Budget-aware week planner (AI with structured inventory context, or template): few recipes reused across the week, leftover lunches, snacks to protein target, budget trimming, catalog-priced consolidated shopping list by category with "used in", pantry leftovers skipped/reduced, prep plan with time estimate.
+* Shopping list: check / purchased / skip / edit quantity & price; budget vs estimated vs actual vs remaining; Done shopping moves purchases into the pantry (reversible).
+* Pantry: lightweight inventory (levels or quantities, purchase/expiry dates), "What can I eat tonight?" suggestions from what you have (expiring first), Cook this logs the meal and consumes ingredients. End-of-week leftover review feeds the next list.
+* Feedback card (spend vs budget, reuse %, leftovers carried, meals cooked, eating out). Weekly quests: plan meals +50, shop within budget +40, complete meal prep +60; new achievements.
+
+### Home
+* Cards prioritised by time of day (morning message, quests, plan; midday progress; evening remaining calories/protein, special quest, tonight's sleep schedule, tomorrow preview). Sunday card for weekly preparation.
+
+### Tests
+* 36 new tests (118 total): ledger voids, workout lifecycle, meal lifecycle, saved foods, Apple Health aggregation/ingest/matching, sleep schedule, motivation variety, reminders, ingredient catalog, weekly planner, Sunday flow end to end.
+
 ## 0.2.0 — 2026-10-13
 
 Knight-themed expansion: the home screen is now a character hero with rank art, optional special quests, an AI-optional planner for training and meals, a full workout session tracker, nutrition tracking, a coach, notifications, and expanded onboarding/settings.

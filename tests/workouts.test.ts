@@ -184,7 +184,7 @@ describe("workout sessions", () => {
     expect(w.getSession(s.id)!.exercises.some((e) => e.id === added.id)).toBe(false);
     const before = totalXp();
     const fin = w.finishSession(s.id)!;
-    expect(fin.session.status).toBe("abandoned");
+    expect(fin.session.status).toBe("cancelled");
     expect(fin.xp.length).toBe(0);
     expect(totalXp()).toBe(before);
     expect(getDb().select().from(workouts).all().length).toBe(2);

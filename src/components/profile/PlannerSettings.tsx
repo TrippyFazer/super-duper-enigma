@@ -231,7 +231,54 @@ export function PlannerSettings({ prefs, ai, estimated, minCalories }: { prefs: 
             <input type="checkbox" checked={notif[k]} onChange={(e) => setNotif({ ...notif, [k]: e.target.checked })} className="h-5 w-5 accent-[var(--color-accent)]" />
           </label>
         ))}
-        <p className="text-[11px] text-muted">Device notifications are enabled from the Notices screen.</p>
+        <div className="hairline my-2" />
+        <div className="text-[10px] uppercase tracking-wider text-faint">Reminders</div>
+        <label className="flex items-center justify-between py-1 text-sm">
+          <span>
+            Morning motivation
+            <span className="block text-[11px] text-muted">At your wake time. Uses your own reasons, progress and today&apos;s first quest. Never the same line twice in a row.</span>
+          </span>
+          <input type="checkbox" checked={notif.morningMotivation} onChange={(e) => setNotif({ ...notif, morningMotivation: e.target.checked })} className="h-5 w-5 accent-[var(--color-accent)]" />
+        </label>
+        <label className="flex items-center justify-between py-1 text-sm">
+          <span>
+            Wind-down reminder
+            <span className="block text-[11px] text-muted">Based on your wake time and sleep target (edit in Sleep schedule).</span>
+          </span>
+          <input type="checkbox" checked={notif.windDown} onChange={(e) => setNotif({ ...notif, windDown: e.target.checked })} className="h-5 w-5 accent-[var(--color-accent)]" />
+        </label>
+        {notif.windDown && (
+          <div className="flex items-center gap-2 pl-1 text-xs">
+            <span className="text-muted">Remind me</span>
+            <select value={String([0, 15, 30, 60].includes(notif.windDownLeadMin) ? notif.windDownLeadMin : "custom")} onChange={(e) => setNotif({ ...notif, windDownLeadMin: e.target.value === "custom" ? 45 : Number(e.target.value) })} className={cx(inputClass, "w-auto py-1.5")}>
+              <option value="0">at wind-down</option>
+              <option value="15">15 min before</option>
+              <option value="30">30 min before</option>
+              <option value="60">60 min before</option>
+              <option value="custom">custom</option>
+            </select>
+            {![0, 15, 30, 60].includes(notif.windDownLeadMin) && <input type="number" min={0} max={240} value={notif.windDownLeadMin} onChange={(e) => setNotif({ ...notif, windDownLeadMin: Number(e.target.value) })} className={cx(inputClass, "w-20 py-1.5 text-center")} />}
+          </div>
+        )}
+        <label className="flex items-center justify-between py-1 text-sm">
+          <span>Workout reminder</span>
+          <span className="flex items-center gap-2">
+            {notif.workoutReminder && <input type="time" value={notif.workoutReminderTime} onChange={(e) => setNotif({ ...notif, workoutReminderTime: e.target.value })} className={cx(inputClass, "w-auto py-1")} />}
+            <input type="checkbox" checked={notif.workoutReminder} onChange={(e) => setNotif({ ...notif, workoutReminder: e.target.checked })} className="h-5 w-5 accent-[var(--color-accent)]" />
+          </span>
+        </label>
+        <label className="flex items-center justify-between py-1 text-sm">
+          <span>Meal prep reminder <span className="text-[11px] text-muted">(Sunday)</span></span>
+          <input type="checkbox" checked={notif.mealPrepReminder} onChange={(e) => setNotif({ ...notif, mealPrepReminder: e.target.checked })} className="h-5 w-5 accent-[var(--color-accent)]" />
+        </label>
+        <label className="flex items-center justify-between py-1 text-sm">
+          <span>Weekly planning <span className="text-[11px] text-muted">(Sunday)</span></span>
+          <span className="flex items-center gap-2">
+            {notif.weeklyPlanning && <input type="time" value={notif.weeklyPlanningTime} onChange={(e) => setNotif({ ...notif, weeklyPlanningTime: e.target.value })} className={cx(inputClass, "w-auto py-1")} />}
+            <input type="checkbox" checked={notif.weeklyPlanning} onChange={(e) => setNotif({ ...notif, weeklyPlanning: e.target.checked })} className="h-5 w-5 accent-[var(--color-accent)]" />
+          </span>
+        </label>
+        <p className="text-[11px] text-muted">Device notifications are enabled from the Notices screen. Reminders fire while the app is open or installed; the iOS bridge can deliver them in the background.</p>
       </Card>
 
       <Button onClick={save} disabled={pending} full size="lg" variant="gold">

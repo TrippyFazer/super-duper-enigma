@@ -16,8 +16,6 @@ export function SettingsForm({ profile }: { profile: { name: string; age: number
   const [domains, setDomains] = useState<DomainId[]>(profile.activeDomains);
   const [t, setT] = useState({
     stepsTarget: String(profile.targets.stepsTarget),
-    bedtimeTarget: profile.targets.bedtimeTarget ?? "",
-    sleepTargetMin: String(profile.targets.sleepTargetMin),
     workoutsPerWeekTarget: String(profile.targets.workoutsPerWeekTarget),
     mealsPerWeekTarget: String(profile.targets.mealsPerWeekTarget),
   });
@@ -34,8 +32,6 @@ export function SettingsForm({ profile }: { profile: { name: string; age: number
           activeDomains: domains,
           targets: {
             stepsTarget: Number(t.stepsTarget) || 7500,
-            bedtimeTarget: t.bedtimeTarget || null,
-            sleepTargetMin: Number(t.sleepTargetMin) || 450,
             workoutsPerWeekTarget: Number(t.workoutsPerWeekTarget) || 3,
             mealsPerWeekTarget: Number(t.mealsPerWeekTarget) || 7,
           },
@@ -99,12 +95,7 @@ export function SettingsForm({ profile }: { profile: { name: string; age: number
           <Field label="Steps / day">
             <input type="number" inputMode="numeric" step={500} value={t.stepsTarget} onChange={(e) => setT({ ...t, stepsTarget: e.target.value })} className={inputClass} />
           </Field>
-          <Field label="Sleep target (min)">
-            <input type="number" inputMode="numeric" step={15} value={t.sleepTargetMin} onChange={(e) => setT({ ...t, sleepTargetMin: e.target.value })} className={inputClass} />
-          </Field>
-          <Field label="Bedtime target">
-            <input type="time" value={t.bedtimeTarget} onChange={(e) => setT({ ...t, bedtimeTarget: e.target.value })} className={inputClass} />
-          </Field>
+          <p className="col-span-2 text-[11px] text-muted">Sleep duration, wake time and bedtime live in the Sleep schedule section below.</p>
         </div>
       </Card>
 

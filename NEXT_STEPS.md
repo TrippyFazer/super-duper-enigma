@@ -1,5 +1,11 @@
 # Next steps
 
+Shipped in 0.3.0: Apple Health bridge + aggregation, workout/meal lifecycles, reversible XP ledger, eating-out logging, sleep planning, motivation, scheduled reminders, Sunday weekly food planning with pantry. Highest-value follow-ups now:
+
+0. **Ship the iOS shell.** `native/ios` has the HealthKit bridge; wrapping the PWA in Capacitor and adding the bridge gives background delivery and native notifications (morning motivation and wind-down can then fire with the app closed).
+0b. **Photo / barcode food logging.** The Log food sheet has Search · Restaurant · Quick · Estimate · Recipe; a barcode scan (Open Food Facts by EAN) is a small addition, photo estimation is an AI vision call behind the same ESTIMATE label.
+0c. **Store price memory.** Actual prices entered after shopping could seed per-ingredient price estimates for future weeks (currently the catalog estimate is used until an actual price is entered for that week).
+
 Everything core ships in the app today. These are optional improvements, roughly in order of value.
 
 1. **Scheduled Oura sync.** Today sync runs on demand (one tap on the Sleep page or in Settings). A small cron/launchd job calling a protected `/api/oura/sync` endpoint would keep sleep data current without opening the app.

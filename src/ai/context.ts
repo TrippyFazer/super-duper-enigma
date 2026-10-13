@@ -6,6 +6,11 @@ import { loadRecipes, loadSleep, loadWorkouts } from "@/services/loaders";
 import { dayTotals, entriesForDate, resolveTargets } from "@/services/nutrition";
 import type { ProfileView } from "@/services/profile";
 import { listPersonalRecords, recentSessions } from "@/services/workouts";
+import { expiringSoon, listPantry, servingsOnHand } from "@/services/pantry";
+import { getDb } from "@/db/client";
+import { groceryWeeks, nutritionEntries } from "@/db/schema";
+import { and, desc, eq, gte } from "drizzle-orm";
+import { startOfWeek } from "@/lib/dates";
 import type { Preferences } from "@/services/preferences";
 
 /**
@@ -45,6 +50,14 @@ export interface AiContext {
     maxPrepMin: number;
     budget: string;
     savedRecipes: { id: number; name: string; mealType: string; calories: number | null; protein: number | null; tags: string[] }[];
+    /** Inventory-aware planning context */
+    availableIngredients: { name: string; quantity: number | null; unit: string; servings: number | null }[];
+    expiringIngredients: string[];
+    remainingCalories: number;
+    remainingProtein: number;
+    timeAvailableMin: number;
+    budgetRemaining: number | null;
+    recentMeals: string[];
   };
 }
 
@@ -98,6 +111,16 @@ export function buildAiContext(profile: ProfileView, prefs: Preferences, assessm
       maxPrepMin: prefs.nutrition.maxPrepMin,
       budget: prefs.nutrition.budget,
       savedRecipes: recipes.filter((r) => r.isSaved || r.isFavorite || r.source === "custom").slice(0, 30).map((r) => ({ id: r.id, name: r.name, mealType: r.mealType, calories: r.calories, protein: r.proteinG, tags: r.tagsParsed })),
+      availableIngredients: listPantry().slice(0, 60).map((p) => ({ name: p.name, quantity: p.qty, unit: p.unit, servings: servingsOnHand(p) })),
+      expiringIngredients: expiringSoon(today, 3).map((p) => p.name),
+      remainingCalories: targets.calories - totals.calories,
+      remainingProtein: targets.protein - totals.protein,
+      timeAvailableMin: prefs.nutrition.maxPrepMin,
+      budgetRemaining: (() => {
+        const wk = getDb().select().from(groceryWeeks).where(eq(groceryWeeks.weekStart, startOfWeek(today))).orderBy(desc(groceryWeeks.id)).get();
+        return wk ? Math.round((wk.budget - (wk.actualCost ?? wk.estimatedCost ?? 0)) * 100) / 100 : null;
+      })(),
+      recentMeals: getDb().select({ name: nutritionEntries.name }).from(nutritionEntries).where(and(gte(nutritionEntries.date, addDays(today, -3)))).orderBy(desc(nutritionEntries.id)).limit(12).all().map((r) => r.name),
     },
   };
 }

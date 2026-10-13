@@ -17,7 +17,7 @@ export default function WorkoutPage() {
   const active = getActiveSession();
   if (active) redirect("/planner/workout/session");
   const plan = getPlanForDate(profile.today);
-  const sessions = listSessions(5);
+  const sessions = listSessions(8).filter((s) => s.status === "completed").slice(0, 5);
   const prs = listPersonalRecords().filter((p) => p.kind === "weight").slice(0, 6);
 
   return (

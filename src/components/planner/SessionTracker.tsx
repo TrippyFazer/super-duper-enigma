@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Check, ChevronLeft, MoreHorizontal, Plus, Timer, X, Replace, SkipForward, Trash2 } from "lucide-react";
-import { abandonSessionAction, addExerciseAction, addSetAction, finishSessionAction, logSetAction, removeExerciseAction, replaceExerciseAction, skipExerciseAction } from "@/actions/planner";
+import { Check, ChevronLeft, MoreHorizontal, Plus, Timer, X, Replace, SkipForward, Trash2, Pause, Play, Flag, Ban } from "lucide-react";
+import { addExerciseAction, addSetAction, cancelSessionAction, discardSessionAction, finishSessionAction, logSetAction, pauseSessionAction, removeExerciseAction, replaceExerciseAction, resumeSessionAction, skipExerciseAction } from "@/actions/planner";
 import { useFeedback } from "@/components/feedback/FeedbackProvider";
 import { Sheet } from "@/components/ui/Sheet";
 import { Button, cx, inputClass } from "@/components/ui/primitives";
@@ -33,17 +33,23 @@ export interface SessionVM {
   name: string;
   focus: string;
   startedAt: string;
+  status: string;
+  pausedAt: string | null;
+  pausedSec: number;
   exercises: ExVM[];
 }
 
-function useElapsed(startedAt: string) {
+function useElapsed(startedAt: string, pausedAt: string | null, pausedSec: number) {
   const [s, setS] = useState(0);
   useEffect(() => {
-    const tick = () => setS(Math.max(0, Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000)));
+    const tick = () => {
+      const end = pausedAt ? new Date(pausedAt).getTime() : Date.now();
+      setS(Math.max(0, Math.floor((end - new Date(startedAt).getTime()) / 1000) - pausedSec));
+    };
     tick();
     const t = setInterval(tick, 1000);
     return () => clearInterval(t);
-  }, [startedAt]);
+  }, [startedAt, pausedAt, pausedSec]);
   return s;
 }
 const mmss = (s: number) => `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
@@ -58,8 +64,10 @@ export function SessionTracker({ session }: { session: SessionVM }) {
   const [menu, setMenu] = useState<ExVM | null>(null);
   const [adding, setAdding] = useState(false);
   const [finishing, setFinishing] = useState(false);
+  const [sessionMenu, setSessionMenu] = useState(false);
   const [query, setQuery] = useState("");
-  const elapsed = useElapsed(session.startedAt);
+  const paused = session.status === "paused";
+  const elapsed = useElapsed(session.startedAt, session.pausedAt, session.pausedSec);
   const restRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => setExs(session.exercises), [session.exercises]);
@@ -97,9 +105,23 @@ export function SessionTracker({ session }: { session: SessionVM }) {
       const r = await finishSessionAction(session.id, { notes: notes || null });
       if (!r.ok) return toast(r.error ?? "Could not finish", "error");
       notify(r);
-      if (r.abandoned) toast("Session closed — no sets logged, nothing recorded.", "quest");
+      if (r.abandoned) toast("Session cancelled — no sets logged, nothing recorded.", "quest");
       router.replace("/planner/workout");
     });
+  const cancel = () =>
+    start(async () => {
+      await cancelSessionAction(session.id);
+      toast("Workout cancelled. Nothing was recorded.", "quest");
+      router.replace("/planner/workout");
+    });
+  const discard = () => {
+    if (!window.confirm("Discard this session? It will be removed entirely and will not count toward progress.")) return;
+    start(async () => {
+      await discardSessionAction(session.id);
+      toast("Session discarded", "quest");
+      router.replace("/planner/workout");
+    });
+  };
 
   const catalog = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -118,15 +140,25 @@ export function SessionTracker({ session }: { session: SessionVM }) {
             {mmss(elapsed)} · {doneSets}/{totalSets} sets
           </div>
         </div>
-        {rest && (
+        {rest && !paused && (
           <button onClick={() => setRest(null)} className="press flex items-center gap-1.5 rounded-sm border border-gold/50 bg-gold/10 px-2.5 py-1.5 text-sm text-gold" aria-label="Rest timer, tap to dismiss">
             <Timer size={14} /> <span className="tabular font-semibold">{mmss(rest.left)}</span>
           </button>
         )}
-        <button onClick={() => setFinishing(true)} className="press rounded-sm bg-gradient-to-b from-gold-2 to-gold px-3.5 py-2 text-sm font-semibold text-[#1a1406]" style={{ clipPath: "polygon(5px 0,100% 0,100% calc(100% - 5px),calc(100% - 5px) 100%,0 100%,0 5px)" }}>
-          Finish
+        {paused ? (
+          <button onClick={() => start(async () => { await resumeSessionAction(session.id); router.refresh(); })} className="press flex items-center gap-1.5 rounded-sm border border-success/50 bg-success/10 px-3 py-2 text-sm font-semibold text-success">
+            <Play size={14} /> Resume
+          </button>
+        ) : (
+          <button onClick={() => setFinishing(true)} className="press rounded-sm bg-gradient-to-b from-gold-2 to-gold px-3.5 py-2 text-sm font-semibold text-[#1a1406]" style={{ clipPath: "polygon(5px 0,100% 0,100% calc(100% - 5px),calc(100% - 5px) 100%,0 100%,0 5px)" }}>
+            Finish
+          </button>
+        )}
+        <button onClick={() => setSessionMenu(true)} aria-label="Session options" className="press flex h-9 w-9 items-center justify-center rounded-full border border-border bg-card text-text-2">
+          <MoreHorizontal size={18} />
         </button>
       </header>
+      {paused && <div className="rounded-lg border border-border bg-card-2 px-3 py-2 text-center text-xs text-muted">Paused — the clock is stopped. Resume when you&apos;re back.</div>}
 
       {rest && (
         <div className="h-1 w-full overflow-hidden rounded-full bg-black/40">
@@ -246,7 +278,31 @@ export function SessionTracker({ session }: { session: SessionVM }) {
         </ul>
       </Sheet>
 
-      <FinishSheet open={finishing} onClose={() => setFinishing(false)} doneSets={doneSets} onFinish={finish} onAbandon={() => start(async () => { await abandonSessionAction(session.id); router.replace("/planner/workout"); })} pending={pending} />
+      <Sheet open={sessionMenu} onClose={() => setSessionMenu(false)} title="Session">
+        <div className="space-y-2 pb-2">
+          {paused ? (
+            <Button full variant="secondary" disabled={pending} onClick={() => start(async () => { await resumeSessionAction(session.id); setSessionMenu(false); router.refresh(); })}>
+              <Play size={14} /> Resume
+            </Button>
+          ) : (
+            <Button full variant="secondary" disabled={pending} onClick={() => start(async () => { await pauseSessionAction(session.id); setSessionMenu(false); router.refresh(); })}>
+              <Pause size={14} /> Pause
+            </Button>
+          )}
+          <Button full variant="secondary" disabled={pending} onClick={() => { setSessionMenu(false); setFinishing(true); }}>
+            <Flag size={14} /> End early {doneSets > 0 ? `· keep ${doneSets} sets` : ""}
+          </Button>
+          <Button full variant="secondary" disabled={pending} onClick={() => { setSessionMenu(false); cancel(); }}>
+            <Ban size={14} /> Cancel workout
+          </Button>
+          <Button full variant="danger" disabled={pending} onClick={() => { setSessionMenu(false); discard(); }}>
+            <Trash2 size={14} /> Discard session
+          </Button>
+          <p className="serif px-1 text-center text-[12px] text-muted">End early saves what you did. Cancel keeps a note that nothing happened. Discard removes every trace — no XP, no penalty either way.</p>
+        </div>
+      </Sheet>
+
+      <FinishSheet open={finishing} onClose={() => setFinishing(false)} doneSets={doneSets} onFinish={finish} onAbandon={() => { setFinishing(false); cancel(); }} pending={pending} />
     </div>
   );
 }
@@ -261,15 +317,15 @@ function FinishSheet({ open, onClose, doneSets, onFinish, onAbandon, pending }: 
       footer={
         <div className="flex gap-2">
           <Button variant="ghost" disabled={pending} onClick={onAbandon}>
-            <X size={14} /> Discard
+            <X size={14} /> Cancel
           </Button>
           <Button full variant="gold" disabled={pending} onClick={() => onFinish(notes)}>
-            {doneSets > 0 ? `Finish · ${doneSets} sets · +25 XP` : "Close without logging"}
+            {doneSets > 0 ? `Finish · ${doneSets} sets` : "Close without logging"}
           </Button>
         </div>
       }
     >
-      <p className="serif text-[14px] text-text-2">{doneSets > 0 ? "Logging this session counts as today's workout, checks for personal records and updates your fitness rank." : "No sets were completed. Closing won't log a workout."}</p>
+      <p className="serif text-[14px] text-text-2">{doneSets > 0 ? "Logging this session counts as today's workout, checks for personal records and updates your fitness rank. Ending early is fine — what you did is what gets saved." : "No sets were completed. Closing won't log a workout, award XP, or count toward anything."}</p>
       <input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Notes (optional)" className={cx(inputClass, "mt-3")} maxLength={300} />
     </Sheet>
   );

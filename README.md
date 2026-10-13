@@ -54,6 +54,8 @@ Copy `.env.example` to `.env.local`. Everything is optional.
 | `AI_API_KEY` | API key for that provider. Optional; can also be entered in Settings → AI provider (stored only in your local database). |
 | `AI_MODEL` | Model id (defaults: `gpt-4o-mini` / `claude-haiku-5-5`) |
 | `AI_BASE_URL` | Override the API base URL, e.g. a local Ollama or Groq endpoint |
+| `HEALTH_INGEST_TOKEN` | Optional static Bearer token for `POST /api/health/ingest` (Apple Health bridge). A token can also be generated in Settings → Connected services. |
+| `FOOD_SEARCH_LIVE` | Set to `off` to disable live Open Food Facts product lookups in food search |
 
 **The whole app works without an AI key.** Workouts, meal plans, special quests and the coach fall back to deterministic templates, the recipe catalog and a rule-based coach. With a key, results are cached per day in `ai_cache` so the home screen never makes a model call; only explicit "generate / regenerate / ask" actions do.
 
@@ -65,9 +67,12 @@ Never commit `.env.local`.
 src/
   app/            Next.js App Router pages: home, onboarding, quests, progress, planner (workout, session, meals, history), coach, notifications, recipes, profile, domains/[domain], API routes
   actions/        Server actions (Zod-validated) — the only write path from the UI
-  services/       Data access + progression (reconcile), quest offers, workouts/sessions/PRs, nutrition, planner, notifications, preferences
+  services/       Data access + progression (reconcile), XP ledger (sources + voids), quest offers, workouts/sessions/PRs, nutrition + planned-meal lifecycle, food weeks (grocery/pantry/prep), sleep plan, motivation, scheduler, notifications, preferences
+  health/         HealthProvider interface, Apple Health ingest + aggregation (de-dup, nights, workout matching)
+  food/           Ingredient catalog (categories, price estimates), chain menu data, unified food search (saved · menu · recipes · Open Food Facts)
   ranking/        Pure ranking engine: scale, ranks, gating, levels, XP rules, quests, quest library + safety guardrails, achievements, rank visuals, domains/*
-  planner/        Exercise catalog, template workout generator (rotation + muscle fatigue + readiness), template meal planner
+  planner/        Exercise catalog, template workout generator, template meal planner, weekly food planner (reuse + budget), pantry suggestions, day adjustment
+native/ios/       Swift HealthKit bridge (read-only, anchored + observer queries with background delivery)
   ai/             Provider abstraction (OpenAI-compatible / Anthropic), Zod output contracts, context builder, generation + cache
   db/             Drizzle schema, migrations, SQLite client, recipe + nutrition seed
   integrations/   Oura API v2 client + sync
@@ -92,6 +97,15 @@ Stack: Next.js 15 (App Router, server actions), React 19, TypeScript, Tailwind 4
 
 Full detail with sources: `docs/ranking-methodology.md` and `docs/ranking-research.md`.
 
+## Apple Health (Oura → Apple Health → Ascend)
+
+The preferred health-data path on iPhone. The web app cannot read HealthKit, so a small iOS
+bridge (a Shortcuts automation, or the native Swift bridge in `native/ios`) posts read-only
+samples to `/api/health/ingest`. The server de-duplicates overlapping sources (no double-counted
+steps), builds nights from sleep stages, matches Apple Health workouts to logged sessions instead
+of duplicating them, and never overwrites manual entries. Metrics show as available only when real
+samples have arrived. See `docs/apple-health.md`.
+
 ## Oura Ring
 
 Connect in **Profile → Settings → Oura Ring**. Oura retired personal access tokens in Dec 2025, so the supported route is an OAuth app (two env vars). Without Oura, sleep and steps are logged manually in two taps. See `docs/oura-integration.md`.
@@ -103,6 +117,6 @@ Everything lives in `data/ascend.db` on the machine running the app. Financial f
 ## Testing
 
 ```bash
-npm test          # 82 tests: engine, XP ledger, quests, achievements, quest offers (no-penalty decline, expiry, XP bands, guardrails), AI contracts + fallback + cache, workout sessions/PRs, nutrition + meal plans
+npm test          # 118 tests: engine, XP ledger, quests, achievements, quest offers (no-penalty decline, expiry, XP bands, guardrails), AI contracts + fallback + cache, workout sessions/PRs, nutrition + meal plans
 npm run typecheck
 ```

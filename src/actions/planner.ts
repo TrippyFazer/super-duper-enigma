@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getProfile, updateProfile } from "@/services/profile";
 import { reconcile } from "@/services/progression";
-import { acceptOffer, completeOffer, declineOffer } from "@/services/questOffers";
+import { acceptOffer, completeOffer, declineOffer, uncompleteOffer, offerStepQuest } from "@/services/questOffers";
 import * as w from "@/services/workouts";
 import * as n from "@/services/nutrition";
 import { askCoach, getOrGenerateMeals, getOrGenerateWorkout } from "@/services/planner";
@@ -53,6 +53,23 @@ export async function completeOfferAction(id: number): Promise<ActionFeedback> {
 }
 
 // ----------------------------------------------------------- workouts ----
+/** "1,158 steps left — want a short walk quest?" → accepted walk quest for tonight. */
+export async function offerStepQuestAction(): Promise<ActionFeedback> {
+  const p = getProfile();
+  const { todayHealthSnapshot } = await import("@/health/apple");
+  const snap = todayHealthSnapshot();
+  const remaining = Math.max(0, p.targets.stepsTarget - (snap.steps ?? 0));
+  if (remaining <= 0) return fail(new Error("Step target already reached"));
+  const o = offerStepQuest({ today: p.today, now: new Date(), remaining });
+  revalidatePath("/", "layout");
+  return o ? { ...feedback([`Walk quest accepted · +${o.xpReward} XP when done`], 0), ok: true } : fail(new Error("Another special quest is already open"));
+}
+/** Undo an accidental special-quest completion: XP is voided, the quest goes back to accepted. */
+export async function uncompleteOfferAction(id: number) {
+  uncompleteOffer(z.number().int().parse(id));
+  reconcile();
+  revalidatePath("/", "layout");
+}
 export async function generateWorkoutAction(opts: { force?: boolean; adjust?: string } = {}) {
   const r = await getOrGenerateWorkout({ force: opts.force, adjust: opts.adjust ? z.string().max(300).parse(opts.adjust) : undefined });
   revalidatePath("/planner", "layout");
@@ -101,14 +118,32 @@ export async function finishSessionAction(id: number, opts: { notes?: string | n
     if (!r) return fail(new Error("Session not active"));
     const direct = r.xp.reduce((a, b) => a + b.amount, 0);
     const fb = feedback(r.xp.map((x) => `${x.description} +${x.amount}`), direct);
-    return { ...fb, prs: r.prs, abandoned: r.session.status === "abandoned" };
+    return { ...fb, prs: r.prs, abandoned: r.session.status === "cancelled" };
   } catch (e) {
     return fail(e);
   }
 }
 export async function abandonSessionAction(id: number) {
-  w.abandonSession(z.number().int().parse(id));
+  w.cancelSession(z.number().int().parse(id));
   revalidatePath("/planner", "layout");
+}
+export async function cancelSessionAction(id: number) {
+  w.cancelSession(z.number().int().parse(id));
+  revalidatePath("/planner", "layout");
+  revalidatePath("/");
+}
+export async function pauseSessionAction(id: number) {
+  w.pauseSession(z.number().int().parse(id));
+}
+export async function resumeSessionAction(id: number) {
+  w.resumeSession(z.number().int().parse(id));
+}
+/** Remove a session from history entirely (accidental start / wrong entry). XP it earned is voided. */
+export async function discardSessionAction(id: number): Promise<{ ok: boolean; voidedXp: number }> {
+  const r = w.discardSession(z.number().int().parse(id));
+  reconcile();
+  revalidatePath("/", "layout");
+  return { ok: true, voidedXp: r.voidedXp };
 }
 
 // ---------------------------------------------------------- nutrition ----
@@ -118,27 +153,55 @@ export async function generateMealsAction(opts: { force?: boolean; onHand?: stri
   revalidatePath("/");
   return { ok: true, source: r.source, error: r.error ?? null };
 }
+const mealTypeSchema = z.enum(["breakfast", "lunch", "dinner", "snack"]);
 const logSchema = z.object({
-  mealType: z.enum(["breakfast", "lunch", "dinner", "snack"]),
+  mealType: mealTypeSchema,
   name: z.string().trim().min(1).max(120),
   calories: z.coerce.number().min(0).max(5000),
-  protein: z.coerce.number().min(0).max(400),
+  protein: z.coerce.number().min(0).max(400).optional().default(0),
   carbs: z.coerce.number().min(0).max(800).optional(),
   fat: z.coerce.number().min(0).max(400).optional(),
-  source: z.enum(["manual", "quick", "plan", "recipe", "ai"]).optional(),
+  source: z.enum(["manual", "quick", "plan", "recipe", "ai", "restaurant", "estimate", "saved", "openfoodfacts"]).optional(),
   recipeId: z.number().int().optional().nullable(),
   planMealIndex: z.number().int().optional().nullable(),
+  plannedMealId: z.number().int().optional().nullable(),
+  replacesPlannedMealId: z.number().int().optional().nullable(),
+  savedFoodId: z.number().int().optional().nullable(),
+  isEstimate: z.boolean().optional(),
+  venue: z.string().max(80).optional().nullable(),
   cooked: z.boolean().optional(),
   portion: z.number().min(0.1).max(5).optional(),
+  /** also store as a saved food for one-tap reuse */
+  save: z.boolean().optional(),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
 });
-export async function logNutritionAction(input: z.input<typeof logSchema>): Promise<ActionFeedback> {
+export type LogFoodInput = z.input<typeof logSchema>;
+export async function logNutritionAction(input: LogFoodInput): Promise<ActionFeedback & { entryId?: number; adjustOffer?: { unplanned: string; remaining: number } | null }> {
   try {
     const p = getProfile();
     const s = logSchema.parse(input);
     const t = n.resolveTargets(p.preferences.nutrition, p);
     const portion = s.portion ?? 1;
-    const r = n.logNutrition({ date: p.today, mealType: s.mealType, name: s.name, calories: s.calories * portion, protein: s.protein * portion, carbs: (s.carbs ?? 0) * portion, fat: (s.fat ?? 0) * portion, source: s.source, recipeId: s.recipeId, planMealIndex: s.planMealIndex, cooked: s.cooked }, { proteinTarget: t.protein, calorieTarget: t.calories, unsafeTargets: t.unsafe });
-    return feedback(r.xp.map((x) => `${x.description} +${x.amount}`), r.xp.reduce((a, b) => a + b.amount, 0));
+    const date = s.date ?? p.today;
+    let savedFoodId = s.savedFoodId ?? null;
+    if (s.save && !savedFoodId) savedFoodId = n.saveFood({ name: s.name, brand: s.venue ?? null, calories: s.calories, protein: s.protein, carbs: s.carbs, fat: s.fat, source: s.source ?? "manual", isEstimate: s.isEstimate }).id;
+    const r = n.logNutrition(
+      { date, mealType: s.mealType, name: s.name, calories: s.calories * portion, protein: (s.protein ?? 0) * portion, carbs: (s.carbs ?? 0) * portion, fat: (s.fat ?? 0) * portion, source: s.source, recipeId: s.recipeId, planMealIndex: s.planMealIndex, plannedMealId: s.plannedMealId, replacesPlannedMealId: s.replacesPlannedMealId, savedFoodId, isEstimate: s.isEstimate, venue: s.venue, cooked: s.cooked },
+      { proteinTarget: t.protein, calorieTarget: t.calories, unsafeTargets: t.unsafe },
+    );
+    reconcile();
+    revalidatePath("/", "layout");
+    const fb = feedback(r.xp.map((x) => `${x.description} +${x.amount}`), r.xp.reduce((a, b) => a + b.amount, 0));
+    // Offer to rebalance the rest of the day when an unplanned meal lands far from the plan.
+    let adjustOffer: { unplanned: string; remaining: number } | null = null;
+    if (date === p.today && !s.plannedMealId) {
+      const plan = n.getMealPlan(date);
+      const remaining = plan?.meals.filter((m) => m.status === "planned" || m.status === "prepared") ?? [];
+      const replaced = s.replacesPlannedMealId ? plan?.meals.find((m) => m.id === s.replacesPlannedMealId) : null;
+      const delta = replaced ? s.calories * portion - replaced.calories : s.calories * portion;
+      if (remaining.length && Math.abs(delta) >= 150) adjustOffer = { unplanned: s.name, remaining: remaining.length };
+    }
+    return { ...fb, entryId: r.entry.id, adjustOffer };
   } catch (e) {
     return fail(e);
   }
@@ -148,18 +211,77 @@ export async function logRecipeNutritionAction(recipeId: number, mealType: "brea
   if (!r) return fail(new Error("Recipe not found"));
   return logNutritionAction({ mealType, name: r.name, calories: r.calories ?? 0, protein: r.proteinG ?? 0, carbs: r.carbsG ?? 0, fat: r.fatG ?? 0, source: "recipe", recipeId: r.id, cooked });
 }
-export async function updateNutritionEntryAction(id: number, patch: { calories?: number; protein?: number; carbs?: number; fat?: number; name?: string; portion?: number }) {
-  n.updateEntry(z.number().int().parse(id), patch);
+function xpCtx() {
+  const p = getProfile();
+  const t = n.resolveTargets(p.preferences.nutrition, p);
+  return { proteinTarget: t.protein, calorieTarget: t.calories, unsafeTargets: t.unsafe };
+}
+export async function updateNutritionEntryAction(id: number, patch: { calories?: number; protein?: number; carbs?: number; fat?: number; name?: string; portion?: number; mealType?: string }) {
+  n.updateEntry(z.number().int().parse(id), patch, xpCtx());
   reconcile();
   revalidatePath("/", "layout");
 }
-export async function deleteNutritionEntryAction(id: number) {
-  n.deleteEntry(z.number().int().parse(id));
+export async function deleteNutritionEntryAction(id: number): Promise<{ ok: true; voidedXp: number }> {
+  const r = n.deleteEntry(z.number().int().parse(id), xpCtx());
   reconcile();
   revalidatePath("/", "layout");
+  return { ok: true, voidedXp: r.voidedXp };
+}
+export async function searchFoodsAction(q: string): Promise<{ hits: import("@/food/search").FoodHit[]; liveError: string | null }> {
+  const { searchFoods } = await import("@/food/search");
+  return searchFoods(z.string().max(80).parse(q));
+}
+export async function estimateFoodAction(description: string): Promise<{ ok: boolean; estimate?: { name: string; calories: number; protein: number; carbs: number; fat: number; confidence: string; assumptions: string }; error?: string }> {
+  try {
+    const { estimateFood } = await import("@/ai/generate");
+    const e = await estimateFood(z.string().trim().min(3).max(300).parse(description));
+    if (!e) return { ok: false, error: "AI is not configured. Use Quick add with your best guess — it can be edited later." };
+    return { ok: true, estimate: e };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+}
+export async function recentFoodsAction(q?: string) {
+  return n.listSavedFoods({ q, limit: 12 }).map((f) => ({ id: f.id, name: f.name, brand: f.brand, serving: f.servingDesc, calories: f.calories, protein: f.protein, carbs: f.carbs, fat: f.fat, isEstimate: f.isEstimate }));
+}
+export async function saveFoodAction(input: { name: string; brand?: string | null; serving?: string | null; calories: number; protein?: number; carbs?: number; fat?: number; isEstimate?: boolean; source?: string }) {
+  const f = n.saveFood({ name: z.string().trim().min(1).max(120).parse(input.name), brand: input.brand ?? null, servingDesc: input.serving ?? null, calories: z.number().min(0).max(5000).parse(input.calories), protein: input.protein, carbs: input.carbs, fat: input.fat, isEstimate: input.isEstimate, source: input.source });
+  return { id: f.id };
+}
+export async function deleteSavedFoodAction(id: number) {
+  n.deleteSavedFood(z.number().int().parse(id));
+}
+// ---------------------------------------------------- planned meals ----
+export async function setPlannedMealStatusAction(id: number, status: "planned" | "prepared" | "skipped" | "discarded") {
+  n.setPlannedMealStatus(z.number().int().parse(id), status);
+  reconcile();
+  revalidatePath("/", "layout");
+}
+export async function updatePlannedMealAction(id: number, patch: { name?: string; calories?: number; protein?: number; carbs?: number; fat?: number; mealType?: string; ingredients?: string[]; notes?: string | null }) {
+  n.updatePlannedMeal(z.number().int().parse(id), patch);
+  revalidatePath("/", "layout");
+}
+export async function replacePlannedMealAction(id: number, next: { name: string; calories: number; protein: number; carbs?: number; fat?: number; ingredients?: string[]; recipeId?: number | null; notes?: string | null }) {
+  const r = n.replacePlannedMeal(z.number().int().parse(id), next);
+  revalidatePath("/", "layout");
+  return r ? { ok: true, id: r.id } : { ok: false };
+}
+export async function discardMealPlanAction(date?: string) {
+  const p = getProfile();
+  const d = date ?? p.today;
+  for (const m of n.getMealPlan(d)?.meals ?? []) if (m.status === "planned" || m.status === "prepared") n.setPlannedMealStatus(m.id, "discarded");
+  revalidatePath("/", "layout");
+}
+export async function proposeDayAdjustmentAction(unplanned: string) {
+  const { proposeAdjustment } = await import("@/services/planner");
+  return proposeAdjustment(z.string().max(120).parse(unplanned));
+}
+export async function applyDayAdjustmentAction(meals: { replacesId: number; name: string; calories: number; protein: number; carbs: number; fat: number; ingredients: string[]; recipeId: number | null; notes: string }[]) {
+  for (const m of meals.slice(0, 6)) n.replacePlannedMeal(z.number().int().parse(m.replacesId), { ...m, source: "adjust" });
+  revalidatePath("/", "layout");
+  return { ok: true };
 }
 
-// --------------------------------------------------------------- coach ----
 export async function askCoachAction(question: string) {
   const q = z.string().trim().min(2).max(500).parse(question);
   return askCoach(q);
@@ -168,14 +290,61 @@ export async function askCoachAction(question: string) {
 // ----------------------------------------------------------- settings ----
 export async function savePreferencesAction(input: unknown) {
   const schema = zod.object({
-    fitness: zod.object({ goal: zod.enum(["general", "strength", "muscle", "fat-loss", "conditioning", "athleticism", "hybrid"]), experience: zod.enum(["beginner", "intermediate", "advanced"]), daysPerWeek: zod.coerce.number().int().min(1).max(7), equipment: zod.array(zod.enum(["barbell", "dumbbell", "cable", "machine", "bodyweight", "kettlebell", "band", "cardio-machine"])), workoutLengthMin: zod.coerce.number().int().min(15).max(120), injuries: zod.string().max(300), preferences: zod.string().max(300) }).partial().optional(),
+    fitness: zod.object({ goal: zod.enum(["general", "strength", "muscle", "fat-loss", "conditioning", "athleticism", "hybrid"]), experience: zod.enum(["beginner", "intermediate", "advanced"]), daysPerWeek: zod.coerce.number().int().min(1).max(7), equipment: zod.array(zod.enum(["barbell", "dumbbell", "cable", "machine", "bodyweight", "kettlebell", "band", "cardio-machine"])), workoutLengthMin: zod.coerce.number().int().min(15).max(120), injuries: zod.string().max(300), preferences: zod.string().max(300), trainingDays: zod.array(zod.number().int().min(0).max(6)).max(7) }).partial().optional(),
     nutrition: zod.object({ goal: zod.enum(["maintain", "lose", "gain", "recomp"]), calorieTarget: zod.coerce.number().int().min(800).max(6000).nullable(), proteinTarget: zod.coerce.number().int().min(20).max(400).nullable(), carbTarget: zod.coerce.number().int().min(0).max(800).nullable(), fatTarget: zod.coerce.number().int().min(0).max(300).nullable(), dietPrefs: zod.array(zod.string().max(30)), dislikes: zod.array(zod.string().max(40)), likes: zod.array(zod.string().max(40)), mealsPerDay: zod.coerce.number().int().min(2).max(6), maxPrepMin: zod.coerce.number().int().min(5).max(120), budget: zod.enum(["low", "medium", "high"]) }).partial().optional(),
     questFrequency: zod.enum(["low", "normal", "high"]).optional(),
-    notifications: zod.object({ quest: zod.boolean(), workout: zod.boolean(), meals: zod.boolean(), level: zod.boolean(), rank: zod.boolean(), achievement: zod.boolean(), sobriety: zod.boolean(), review: zod.boolean(), browser: zod.boolean() }).partial().optional(),
+    notifications: zod.object({ quest: zod.boolean(), workout: zod.boolean(), meals: zod.boolean(), level: zod.boolean(), rank: zod.boolean(), achievement: zod.boolean(), sobriety: zod.boolean(), review: zod.boolean(), browser: zod.boolean(), morningMotivation: zod.boolean(), windDown: zod.boolean(), windDownLeadMin: zod.coerce.number().int().min(0).max(240), workoutReminder: zod.boolean(), workoutReminderTime: zod.string().regex(/^\d{2}:\d{2}$/), mealPrepReminder: zod.boolean(), weeklyPlanning: zod.boolean(), weeklyPlanningTime: zod.string().regex(/^\d{2}:\d{2}$/) }).partial().optional(),
+    sleep: zod.object({ wakeTarget: zod.string().regex(/^\d{2}:\d{2}$/).nullable(), windDownMin: zod.coerce.number().int().min(0).max(120), fallAsleepMin: zod.coerce.number().int().min(0).max(60) }).partial().optional(),
+    food: zod.object({ weeklyBudget: zod.coerce.number().min(0).max(2000), budgetMode: zod.enum(["budget", "balanced", "flexible"]), shoppingDay: zod.coerce.number().int().min(0).max(6), quickWeekdays: zod.boolean(), mealPrep: zod.boolean(), highProtein: zod.boolean(), reuseIngredients: zod.boolean(), eatingOutPerWeek: zod.coerce.number().int().min(0).max(21) }).partial().optional(),
   });
   const s = schema.parse(input);
   updateProfile({ preferences: s as never });
   revalidatePath("/", "layout");
+}
+/** Sleep schedule: wake target + duration → derived bedtime targets (kept in sync with the legacy bedtimeTarget). */
+export async function saveSleepPlanAction(input: { wakeTarget: string | null; sleepTargetMin: number; windDownMin: number; fallAsleepMin: number }) {
+  const s = zod.object({ wakeTarget: zod.string().regex(/^\d{2}:\d{2}$/).nullable(), sleepTargetMin: zod.coerce.number().int().min(300).max(720), windDownMin: zod.coerce.number().int().min(0).max(120), fallAsleepMin: zod.coerce.number().int().min(0).max(60) }).parse(input);
+  const { computeSleepSchedule } = await import("@/services/sleepPlan");
+  const p = getProfile();
+  const targets = { ...p.targets, sleepTargetMin: s.sleepTargetMin };
+  const sched = computeSleepSchedule(targets, { wakeTarget: s.wakeTarget, windDownMin: s.windDownMin, fallAsleepMin: s.fallAsleepMin });
+  updateProfile({ targets: { sleepTargetMin: s.sleepTargetMin, bedtimeTarget: sched?.inBed ?? p.targets.bedtimeTarget }, preferences: { sleep: { wakeTarget: s.wakeTarget, windDownMin: s.windDownMin, fallAsleepMin: s.fallAsleepMin } } });
+  // A changed schedule means tonight's reminder should be recomputed, not suppressed by today's key.
+  const { getDb } = await import("@/db/client");
+  const { notifications } = await import("@/db/schema");
+  const { eq } = await import("drizzle-orm");
+  getDb().delete(notifications).where(eq(notifications.key, `n:winddown:${p.today}`)).run();
+  revalidatePath("/", "layout");
+  return sched;
+}
+// ---------------------------------------------------------- motivation ----
+export async function addReasonAction(text: string) {
+  const { addReason } = await import("@/services/motivation");
+  const r = addReason(zod.string().trim().min(3).max(160).parse(text));
+  revalidatePath("/", "layout");
+  return { id: r.id, text: r.text };
+}
+export async function updateReasonAction(id: number, patch: { text?: string; active?: boolean }) {
+  const { updateReason } = await import("@/services/motivation");
+  updateReason(zod.number().int().parse(id), patch);
+  revalidatePath("/", "layout");
+}
+export async function deleteReasonAction(id: number) {
+  const { deleteReason } = await import("@/services/motivation");
+  deleteReason(zod.number().int().parse(id));
+  revalidatePath("/", "layout");
+}
+/** Preview what tomorrow morning's message could say (for the settings screen). */
+export async function previewMorningMessageAction(): Promise<string> {
+  const { buildMorningMessage, motivationInput } = await import("@/services/motivation");
+  const { buildContext, buildEngineInput, getQuests } = await import("@/services/progression");
+  const { assessCharacter } = await import("@/ranking/engine");
+  const p = getProfile();
+  const input = buildEngineInput(p);
+  const ctx = buildContext(p, input, assessCharacter(input));
+  const mi = motivationInput(p, ctx);
+  mi.firstQuest = getQuests(p.today).daily.find((q) => !q.done)?.title ?? null;
+  return buildMorningMessage(mi, p.preferences.motivation.recent, Date.now() % 1000).text;
 }
 export async function saveAiSettingsAction(input: { provider: "openai" | "anthropic"; apiKey: string; model?: string | null; baseUrl?: string | null }): Promise<{ ok: boolean; message: string }> {
   const s = zod.object({ provider: zod.enum(["openai", "anthropic"]), apiKey: zod.string().trim().min(8).max(300), model: zod.string().trim().max(80).nullable().optional(), baseUrl: zod.string().trim().url().max(200).nullable().optional().or(zod.literal("")) }).parse(input);

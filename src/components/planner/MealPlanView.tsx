@@ -2,15 +2,16 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Sparkles, RefreshCw, Check } from "lucide-react";
-import { generateMealsAction, logNutritionAction } from "@/actions/planner";
+import { Sparkles, RefreshCw, Check, MoreHorizontal, SkipForward, Replace, Pencil, Trash2, Undo2, ChefHat } from "lucide-react";
+import { discardMealPlanAction, generateMealsAction, logNutritionAction, replacePlannedMealAction, setPlannedMealStatusAction, updatePlannedMealAction } from "@/actions/planner";
 import { useFeedback } from "@/components/feedback/FeedbackProvider";
 import { Sheet } from "@/components/ui/Sheet";
 import { Button, Field, cx, inputClass } from "@/components/ui/primitives";
 
-interface MealVM {
+export interface MealVM {
+  id: number;
   index: number;
-  mealType: "breakfast" | "lunch" | "dinner" | "snack";
+  mealType: string;
   name: string;
   calories: number;
   protein: number;
@@ -18,11 +19,19 @@ interface MealVM {
   fat: number;
   ingredients: string[];
   recipeId?: number | null;
-  notes?: string;
-  eaten: boolean;
+  notes?: string | null;
+  /** planned | prepared | eaten | skipped | replaced | discarded */
+  status: string;
+  source: string;
 }
 
-export function MealPlanView({ plan, aiEnabled }: { plan: { source: string; calorieTarget: number; proteinTarget: number; meals: MealVM[] } | null; aiEnabled: boolean }) {
+const STATUS_LABEL: Record<string, string> = { planned: "", prepared: "Prepped", eaten: "Eaten", skipped: "Skipped", replaced: "Replaced" };
+
+/**
+ * Today's plan with a real lifecycle. Generated ≠ eaten: only "Ate this" writes
+ * calories. Skip / replace / edit / discard are all one tap, all reversible.
+ */
+export function MealPlanView({ plan, aiEnabled, onAdjustOffer }: { plan: { source: string; calorieTarget: number; proteinTarget: number; meals: MealVM[] } | null; aiEnabled: boolean; onAdjustOffer?: (unplanned: string) => void }) {
   const router = useRouter();
   const { notify, toast } = useFeedback();
   const [pending, start] = useTransition();
@@ -30,6 +39,9 @@ export function MealPlanView({ plan, aiEnabled }: { plan: { source: string; calo
   const [request, setRequest] = useState("");
   const [showOpts, setShowOpts] = useState(false);
   const [eating, setEating] = useState<MealVM | null>(null);
+  const [menu, setMenu] = useState<MealVM | null>(null);
+  const [editing, setEditing] = useState<MealVM | null>(null);
+  const [replacing, setReplacing] = useState<MealVM | null>(null);
 
   const generate = (opts: { force?: boolean } = {}) =>
     start(async () => {
@@ -40,18 +52,21 @@ export function MealPlanView({ plan, aiEnabled }: { plan: { source: string; calo
       router.refresh();
     });
 
-  const totals = plan ? plan.meals.reduce((a, m) => ({ c: a.c + m.calories, p: a.p + m.protein, cb: a.cb + m.carbs, f: a.f + m.fat }), { c: 0, p: 0, cb: 0, f: 0 }) : null;
+  const visible = plan ? plan.meals.filter((m) => m.status !== "replaced" && m.status !== "discarded") : [];
+  const live = visible.filter((m) => m.status !== "skipped");
+  const totals = live.reduce((a, m) => ({ c: a.c + m.calories, p: a.p + m.protein }), { c: 0, p: 0 });
+  const eatenTotals = visible.filter((m) => m.status === "eaten").reduce((a, m) => ({ c: a.c + m.calories, p: a.p + m.protein }), { c: 0, p: 0 });
 
   return (
     <>
-      {!plan ? (
+      {!plan || visible.length === 0 ? (
         <section className="plate p-5 text-center">
           <Sparkles size={26} className="mx-auto text-gold" />
           <div className="display mt-3 text-lg font-semibold">Generate today&apos;s meals</div>
-          <p className="serif mt-1 text-[14px] text-muted">{aiEnabled ? "Built around your targets, preferences and what you have." : "Assembled from your recipe catalog to hit your calorie and protein targets."}</p>
+          <p className="serif mt-1 text-[14px] text-muted">{aiEnabled ? "Built around your targets, preferences and what you have." : "Assembled from your recipe catalog to hit your calorie and protein targets."} A plan is a suggestion — nothing counts until you mark it eaten.</p>
           <div className="mt-4 space-y-2">
             <input value={onHand} onChange={(e) => setOnHand(e.target.value)} placeholder="Ingredients on hand (optional): chicken, rice, eggs" className={inputClass} />
-            <Button onClick={() => generate()} disabled={pending} full variant="gold">
+            <Button onClick={() => generate({ force: !!plan })} disabled={pending} full variant="gold">
               {pending ? "Building…" : "Generate today's meals"}
             </Button>
           </div>
@@ -60,28 +75,40 @@ export function MealPlanView({ plan, aiEnabled }: { plan: { source: string; calo
         <section className="plate overflow-hidden">
           <div className="flex items-center justify-between px-4 pt-3 pb-2">
             <div className="text-xs text-muted">
-              {plan.source === "ai" ? "AI plan" : "Template plan"} · {totals!.c} kcal · {totals!.p} g protein · {totals!.cb} g carbs · {totals!.f} g fat
+              {plan.source === "ai" ? "AI plan" : "Template plan"} · {totals.c} kcal · {totals.p} g protein planned
+              {eatenTotals.c > 0 && <span className="text-success"> · {eatenTotals.c} kcal eaten</span>}
             </div>
           </div>
           <ul className="divide-y divide-border/60 border-t border-border/60">
-            {plan.meals.map((m) => (
-              <li key={m.index} className={cx("flex items-center gap-3 px-4 py-3", m.eaten && "opacity-70")}>
+            {visible.map((m) => (
+              <li key={m.id} className={cx("flex items-center gap-2 px-4 py-3", (m.status === "eaten" || m.status === "skipped") && "opacity-70")}>
                 <div className="min-w-0 flex-1">
-                  <div className="text-[10px] uppercase tracking-wider text-faint">{m.mealType}</div>
-                  <div className={cx("text-[15px] font-medium", m.eaten && "line-through decoration-faint")}>{m.name}</div>
+                  <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-faint">
+                    {m.mealType}
+                    {STATUS_LABEL[m.status] && <span className={cx("rounded-full px-1.5 py-0.5 text-[9px]", m.status === "eaten" ? "bg-success/15 text-success" : m.status === "prepared" ? "bg-accent/15 text-accent-2" : "bg-white/5 text-muted")}>{STATUS_LABEL[m.status]}</span>}
+                    {m.source === "adjust" && <span className="rounded-full bg-gold/10 px-1.5 py-0.5 text-[9px] text-gold">Adjusted</span>}
+                  </div>
+                  <div className={cx("text-[15px] font-medium", m.status === "skipped" && "line-through decoration-faint")}>{m.name}</div>
                   <div className="serif text-[12.5px] text-muted">
                     {m.calories} kcal · {m.protein} g protein{m.ingredients.length ? ` · ${m.ingredients.slice(0, 4).join(", ")}` : ""}
                   </div>
                 </div>
-                {m.eaten ? (
+                {m.status === "eaten" ? (
                   <span className="flex h-9 items-center gap-1 rounded-sm border border-success/40 bg-success/10 px-3 text-xs font-medium text-success">
                     <Check size={13} /> Ate this
                   </span>
+                ) : m.status === "skipped" ? (
+                  <button disabled={pending} onClick={() => start(async () => { await setPlannedMealStatusAction(m.id, "planned"); router.refresh(); })} className="press flex h-9 items-center gap-1 rounded-sm border border-border px-3 text-xs text-text-2">
+                    <Undo2 size={13} /> Undo
+                  </button>
                 ) : (
                   <button onClick={() => setEating(m)} className="press h-9 shrink-0 rounded-sm bg-gradient-to-b from-gold-2 to-gold px-3 text-xs font-semibold text-[#1a1406]" style={{ clipPath: "polygon(5px 0,100% 0,100% calc(100% - 5px),calc(100% - 5px) 100%,0 100%,0 5px)" }}>
                     Ate this
                   </button>
                 )}
+                <button aria-label={`Options for ${m.name}`} onClick={() => setMenu(m)} className="press flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-faint hover:bg-white/5">
+                  <MoreHorizontal size={16} />
+                </button>
               </li>
             ))}
           </ul>
@@ -91,6 +118,9 @@ export function MealPlanView({ plan, aiEnabled }: { plan: { source: string; calo
             </Button>
             <Button size="sm" variant="ghost" disabled={pending} onClick={() => setShowOpts((v) => !v)}>
               With options…
+            </Button>
+            <Button size="sm" variant="ghost" disabled={pending} onClick={() => { if (window.confirm("Discard the remaining planned meals for today? Eaten meals stay logged.")) start(async () => { await discardMealPlanAction(); router.refresh(); }); }}>
+              <Trash2 size={13} /> Discard plan
             </Button>
           </div>
           {showOpts && (
@@ -106,6 +136,39 @@ export function MealPlanView({ plan, aiEnabled }: { plan: { source: string; calo
       )}
 
       <EatSheet meal={eating} onClose={() => setEating(null)} onLogged={(fb) => { notify(fb); setEating(null); router.refresh(); }} />
+
+      <Sheet open={!!menu} onClose={() => setMenu(null)} title={menu?.name}>
+        {menu && (
+          <div className="space-y-2 pb-2">
+            {menu.status !== "prepared" && (
+              <Button full variant="secondary" disabled={pending} onClick={() => start(async () => { await setPlannedMealStatusAction(menu.id, "prepared"); setMenu(null); router.refresh(); })}>
+                <ChefHat size={14} /> Mark as prepped
+              </Button>
+            )}
+            <Button full variant="secondary" disabled={pending} onClick={() => { setEditing(menu); setMenu(null); }}>
+              <Pencil size={14} /> Edit calories / name
+            </Button>
+            <Button full variant="secondary" disabled={pending} onClick={() => { setReplacing(menu); setMenu(null); }}>
+              <Replace size={14} /> Replace with something else
+            </Button>
+            <Button full variant="secondary" disabled={pending} onClick={() => start(async () => { await setPlannedMealStatusAction(menu.id, "skipped"); setMenu(null); router.refresh(); })}>
+              <SkipForward size={14} /> Skip this meal
+            </Button>
+            {menu.status === "eaten" && (
+              <Button full variant="secondary" disabled={pending} onClick={() => start(async () => { await setPlannedMealStatusAction(menu.id, "planned"); setMenu(null); toast("Un-eaten: calories and XP reversed", "quest"); router.refresh(); })}>
+                <Undo2 size={14} /> I didn&apos;t actually eat this
+              </Button>
+            )}
+            <Button full variant="danger" disabled={pending} onClick={() => start(async () => { await setPlannedMealStatusAction(menu.id, "discarded"); setMenu(null); router.refresh(); })}>
+              <Trash2 size={14} /> Remove from plan
+            </Button>
+            <p className="serif px-1 text-center text-[12px] text-muted">Skipping or replacing never costs anything. Plans serve you, not the other way around.</p>
+          </div>
+        )}
+      </Sheet>
+
+      <EditMealSheet meal={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); router.refresh(); }} />
+      <ReplaceMealSheet meal={replacing} onClose={() => setReplacing(null)} onSaved={() => { setReplacing(null); router.refresh(); }} onLogInstead={(m) => { setReplacing(null); onAdjustOffer?.(m.name); }} />
     </>
   );
 }
@@ -128,7 +191,7 @@ function EatSheet({ meal, onClose, onLogged }: { meal: MealVM | null; onClose: (
           disabled={pending}
           onClick={() =>
             start(async () => {
-              const r = await logNutritionAction({ mealType: meal.mealType, name: meal.name, calories: meal.calories, protein: meal.protein, carbs: meal.carbs, fat: meal.fat, source: "plan", recipeId: meal.recipeId ?? null, planMealIndex: meal.index, cooked, portion });
+              const r = await logNutritionAction({ mealType: meal.mealType as "breakfast", name: meal.name, calories: meal.calories, protein: meal.protein, carbs: meal.carbs, fat: meal.fat, source: "plan", recipeId: meal.recipeId ?? null, plannedMealId: meal.id, cooked, portion });
               onLogged(r);
             })
           }
@@ -167,6 +230,58 @@ function EatSheet({ meal, onClose, onLogged }: { meal: MealVM | null; onClose: (
           </div>
           <input type="checkbox" checked={cooked} onChange={(e) => setCooked(e.target.checked)} className="h-5 w-5 accent-[var(--color-accent)]" />
         </label>
+      </div>
+    </Sheet>
+  );
+}
+
+function EditMealSheet({ meal, onClose, onSaved }: { meal: MealVM | null; onClose: () => void; onSaved: () => void }) {
+  const [f, setF] = useState<Record<string, string>>({});
+  const [pending, start] = useTransition();
+  if (!meal) return null;
+  const v = (k: "name" | "calories" | "protein" | "carbs" | "fat") => f[k] ?? String(meal[k]);
+  return (
+    <Sheet open onClose={onClose} title="Edit planned meal" footer={<Button full variant="gold" disabled={pending} onClick={() => start(async () => { await updatePlannedMealAction(meal.id, { name: v("name"), calories: Number(v("calories")), protein: Number(v("protein")), carbs: Number(v("carbs")), fat: Number(v("fat")) }); onSaved(); })}>Save</Button>}>
+      <div className="space-y-3 pb-2">
+        <Field label="Name">
+          <input value={v("name")} onChange={(e) => setF({ ...f, name: e.target.value })} className={inputClass} />
+        </Field>
+        <div className="grid grid-cols-4 gap-2">
+          {(["calories", "protein", "carbs", "fat"] as const).map((k) => (
+            <Field key={k} label={k === "calories" ? "kcal" : k}>
+              <input type="number" inputMode="numeric" value={v(k)} onChange={(e) => setF({ ...f, [k]: e.target.value })} className={cx(inputClass, "px-2 text-center")} />
+            </Field>
+          ))}
+        </div>
+      </div>
+    </Sheet>
+  );
+}
+
+function ReplaceMealSheet({ meal, onClose, onSaved, onLogInstead }: { meal: MealVM | null; onClose: () => void; onSaved: () => void; onLogInstead: (m: MealVM) => void }) {
+  const [f, setF] = useState({ name: "", calories: "", protein: "", carbs: "", fat: "" });
+  const [pending, start] = useTransition();
+  if (!meal) return null;
+  return (
+    <Sheet open onClose={onClose} title={`Replace ${meal.mealType}`}>
+      <div className="space-y-3 pb-2">
+        <p className="serif text-[13.5px] text-muted">Planning something different for this slot? Enter it here. If you already ate something else, log it from “Log food” and mark it as replacing this meal.</p>
+        <Field label="New planned meal">
+          <input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="e.g. Leftover chili" className={inputClass} />
+        </Field>
+        <div className="grid grid-cols-4 gap-2">
+          {(["calories", "protein", "carbs", "fat"] as const).map((k) => (
+            <Field key={k} label={k === "calories" ? "kcal" : k}>
+              <input type="number" inputMode="numeric" value={f[k]} onChange={(e) => setF({ ...f, [k]: e.target.value })} className={cx(inputClass, "px-2 text-center")} />
+            </Field>
+          ))}
+        </div>
+        <Button full variant="gold" disabled={pending || !f.name.trim() || !f.calories} onClick={() => start(async () => { await replacePlannedMealAction(meal.id, { name: f.name.trim(), calories: Number(f.calories), protein: Number(f.protein) || 0, carbs: Number(f.carbs) || 0, fat: Number(f.fat) || 0 }); onSaved(); })}>
+          Replace in plan
+        </Button>
+        <Button full variant="secondary" onClick={() => onLogInstead(meal)}>
+          I already ate something else — log it
+        </Button>
       </div>
     </Sheet>
   );

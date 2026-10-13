@@ -15,6 +15,13 @@
       "when": 1791883267156,
       "tag": "0001_planner",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1791907775951,
+      "tag": "0002_reality",
+      "breakpoints": true
     }
   ]
 }

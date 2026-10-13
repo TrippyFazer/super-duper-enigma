@@ -129,6 +129,9 @@ export const ACHIEVEMENTS: AchievementDef[] = [
   { key: "protein_14", name: "Well Fed", description: "Hit your protein target on 14 logged days in a month.", title: "Well Fed", xp: 150, domain: "cooking", check: (c) => !c.nutrition.unsafeTargets && c.nutrition.proteinDays30 >= 14 },
   { key: "special_first", name: "Side Quest", description: "Complete your first special quest.", xp: 30, domain: "overall", check: (c) => c.special.completed >= 1 },
   { key: "special_10", name: "Errand Knight", description: "Complete 10 special quests.", title: "Errand Knight", xp: 150, domain: "overall", check: (c) => c.special.completed >= 10 },
+  { key: "week_planned_first", name: "Provisioner", description: "Plan a full week of meals and groceries.", xp: 40, domain: "cooking", check: (c) => c.food.weeksPlanned >= 1 },
+  { key: "week_planned_4", name: "Steward of the Larder", description: "Plan four weeks of meals.", title: "Steward of the Larder", xp: 150, domain: "cooking", check: (c) => c.food.weeksPlanned >= 4 },
+  { key: "leftover_reviews_4", name: "Waste Not", description: "Review your leftovers four weeks in a row-ish (four reviews).", xp: 100, domain: "cooking", check: (c) => c.food.leftoverReviews >= 4 },
   { key: "special_30", name: "Wanderer", description: "Complete 30 special quests.", title: "Wanderer", xp: 400, domain: "overall", check: (c) => c.special.completed >= 30 },
   { key: "sleep_b", name: "Deep Rest", description: "Reach B rank in Sleep.", xp: 200, domain: "sleep", check: (c) => rankAtLeast(c, "sleep", "B") },
 ];
