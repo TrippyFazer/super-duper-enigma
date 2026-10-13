@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.4.2 — 2026-10-13 · Daily polish
+
+Only what changed daily use; no new features, nothing rewritten.
+
+* **Today card: what's left comes first.** Unfinished rows lead and say what remains ("2,976 steps left", "60 g protein to go"); finished rows fold into one quiet "3 done ✓" line that opens in place. Nothing hidden — a short night or a missing log is never "done".
+* **Home fits a small phone.** The special quest on Home is a compact card (title, reward, time left, Accept / Not now); the full card stays in the Quest journal. On a 375 px iPhone, Today now starts on the first screen instead of below it.
+* **+ is a gold circle**, not a "+ LOG" pill: still the brightest target (56 px), no longer covering the Steps row's "Walk it" button. Pages leave room so the last row scrolls clear of it. Hidden on sign-in.
+* **One context card by urgency** (`services/contextCard.ts`): an imminent wind-down beats a low-value quest; an accepted quest about to expire still wins. Still exactly one card.
+* **Special quests are occasional**: on normal, at most one a day and never within 20 h of the last; trivial "common" quests only when today's signals call for them; no repeat within two weeks. ("High" unchanged.)
+* **Planner speaks in weeks**: "3 planned · 1 done this week", "12 meals planned this week" — no "Today: …" left there.
+* **Oura status in plain words**: Connected · Last synced 42m ago · Sleep ✓ Steps ✓ · Sync now. No OAuth/auth wording; token entry tucked behind "Have a token instead?".
+* **Empty states**: one short line and one action ("No workouts yet · Log a workout").
+* **Food log**: names no longer cut in half on a phone (macros moved under the name). Bottom sheets sit on top of the iOS keyboard instead of behind it.
+* **Quest journal**: titles wrap instead of truncating; "Active" lists only quests you've started, and they aren't repeated under Daily/Weekly.
+* Shorter recurring copy on Meals and the plan sheets.
+
 ## 0.4.1 — 2026-10-13 · Hosted, on Oura
 
 * **Oura is the source**: shown first in Connected services, named on Sleep/Fitness, last-sync time from Oura; Apple Health tucked under "Optional" (still works, not in use).

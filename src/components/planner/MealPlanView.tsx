@@ -73,7 +73,7 @@ export function MealPlanView({ plan, aiEnabled, onAdjustOffer, hideDone }: { pla
         <section className="plate p-5 text-center">
           <Sparkles size={26} className="mx-auto text-gold" />
           <div className="display mt-3 text-lg font-semibold">Generate today&apos;s meals</div>
-          <p className="serif mt-1 text-[14px] text-muted">{aiEnabled ? "Built around your targets, preferences and what you have." : "Assembled from your recipe catalog to hit your calorie and protein targets."} A plan is a suggestion — nothing counts until you mark it eaten.</p>
+          <p className="serif mt-1 text-[14px] text-muted">Built around your calorie and protein targets.</p>
           <div className="mt-4 space-y-2">
             <input value={onHand} onChange={(e) => setOnHand(e.target.value)} placeholder="Ingredients on hand (optional): chicken, rice, eggs" className={inputClass} />
             <Button onClick={() => generate({ force: !!plan })} disabled={pending} full variant="gold">
@@ -172,7 +172,7 @@ export function MealPlanView({ plan, aiEnabled, onAdjustOffer, hideDone }: { pla
             <Button full variant="danger" disabled={pending} onClick={() => start(async () => { await setPlannedMealStatusAction(menu.id, "discarded"); setMenu(null); router.refresh(); })}>
               <Trash2 size={14} /> Remove from plan
             </Button>
-            <p className="serif px-1 text-center text-[12px] text-muted">Skipping or replacing never costs anything. Plans serve you, not the other way around.</p>
+            <p className="serif px-1 text-center text-[12px] text-muted">Skipping costs nothing.</p>
           </div>
         )}
       </Sheet>
@@ -275,7 +275,7 @@ function ReplaceMealSheet({ meal, onClose, onSaved, onLogInstead }: { meal: Meal
   return (
     <Sheet open onClose={onClose} title={`Replace ${meal.mealType}`}>
       <div className="space-y-3 pb-2">
-        <p className="serif text-[13.5px] text-muted">Planning something different for this slot? Enter it here. If you already ate something else, log it from “Log food” and mark it as replacing this meal.</p>
+        <p className="serif text-[13.5px] text-muted">Plan something else here. Already ate? Log it with +.</p>
         <Field label="New planned meal">
           <input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="e.g. Leftover chili" className={inputClass} />
         </Field>

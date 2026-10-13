@@ -192,3 +192,27 @@ describe("profile", () => {
     expect(getProfile().preferences.questFrequency).toBe("low");
   });
 });
+
+describe("offer frequency", () => {
+  it("on normal, a special quest is occasional: one a day at most, never on back-to-back mornings", async () => {
+    // Four weeks no other test uses, every hour of each day.
+    const days = Array.from({ length: 28 }, (_, i) => new Date(Date.UTC(2027, 0, 4 + i)).toISOString().slice(0, 10));
+    const made: { date: string; at: number }[] = [];
+    for (const d of days) {
+      for (let hour = 7; hour < 23; hour++) {
+        const now = new Date(`${d}T${String(hour).padStart(2, "0")}:00:00Z`);
+        const o = await qo.maybeOffer({ today: d, now, localHour: hour, signals: { ...baseSignals(), hour }, frequency: "normal" });
+        if (o) {
+          made.push({ date: d, at: now.getTime() });
+          qo.declineOffer(o.id, now); // close it so the next one is not blocked by an open offer
+        }
+      }
+    }
+    const perDay = new Map<string, number>();
+    for (const m of made) perDay.set(m.date, (perDay.get(m.date) ?? 0) + 1);
+    expect(Math.max(0, ...perDay.values())).toBeLessThanOrEqual(1);
+    expect(made.length).toBeLessThanOrEqual(21); // most days, not every day
+    expect(made.length).toBeGreaterThanOrEqual(7); // but still regularly
+    for (let i = 1; i < made.length; i++) expect(made[i].at - made[i - 1].at).toBeGreaterThanOrEqual(20 * 3600_000);
+  });
+});

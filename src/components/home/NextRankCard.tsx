@@ -52,7 +52,7 @@ export function NextRankCard({ assessment }: { assessment: CharacterAssessment }
             {needs.map((n) => (
               <li key={n.domain}>
                 <Link href={`/domains/${n.domain}`} className="press flex min-h-11 items-center gap-3 px-4 py-1.5">
-                  <span className="display w-16 shrink-0 text-[11px] font-semibold uppercase tracking-wider text-gold">{n.name}</span>
+                  <span className="display w-[5.75rem] shrink-0 truncate text-[11px] font-semibold uppercase tracking-wide text-gold">{n.name}</span>
                   <span className="serif min-w-0 flex-1 truncate text-[13.5px] text-text">{n.need}</span>
                   <span className="tabular shrink-0 text-[11px] text-muted">
                     {n.score}

@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq, gte } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { dailyActivity, integrations, sleepEntries } from "@/db/schema";
 import { addDays, type ISODate } from "@/lib/dates";
@@ -32,6 +32,15 @@ export function getOuraStatus(): OuraStatus {
     lastError: row?.lastError ?? null,
     enabled: row?.enabled ?? !!envToken,
   };
+}
+
+/** What Oura has actually delivered in the last week — for "Sleep ✓ · Steps ✓". */
+export function ouraCoverage(today: string): { sleep: boolean; steps: boolean } {
+  const db = getDb();
+  const since = addDays(today as ISODate, -7);
+  const sleep = db.select({ d: sleepEntries.date }).from(sleepEntries).where(and(eq(sleepEntries.source, "oura"), gte(sleepEntries.date, since))).limit(1).get();
+  const steps = db.select({ d: dailyActivity.date }).from(dailyActivity).where(and(eq(dailyActivity.source, "oura"), gte(dailyActivity.date, since))).limit(1).get();
+  return { sleep: !!sleep, steps: !!steps };
 }
 
 export function saveOuraToken(input: { accessToken: string; refreshToken?: string | null; expiresIn?: number | null; authType: "personal_token" | "oauth" }) {

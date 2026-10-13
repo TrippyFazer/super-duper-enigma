@@ -3,7 +3,7 @@ import { Trophy } from "lucide-react";
 import { getProfile } from "@/services/profile";
 import { getSession, listPersonalRecords, listSessions } from "@/services/workouts";
 import { loadWorkouts } from "@/services/loaders";
-import { Card, PageHeader, SectionTitle } from "@/components/ui/primitives";
+import { Card, PageHeader, SectionTitle, EmptyHint } from "@/components/ui/primitives";
 import { DiscardSessionButton } from "@/components/planner/SessionHistoryActions";
 import { DeleteButton } from "@/components/domain/DeleteButton";
 import { formatShort } from "@/lib/dates";
@@ -62,7 +62,7 @@ export default function HistoryPage() {
         </section>
       )}
 
-      {completed.length === 0 && <Card className="text-center text-sm text-muted">No completed sessions yet.</Card>}
+      {completed.length === 0 && <Card className="p-0"><EmptyHint text="No finished sessions yet." action="Start a workout" href="/planner/workout" /></Card>}
       {completed.map((s) => {
         const full = getSession(s.id)!;
         return (

@@ -6,7 +6,7 @@ import { loadMeals, loadRecipes } from "@/services/loaders";
 import { addDays, formatShort, formatWeekdayShort, lastNDays, startOfWeek } from "@/lib/dates";
 import { LogHereButton } from "@/components/log/LogHereButton";
 import { BarsChart, DayHeatmap } from "@/components/charts/Charts";
-import { Card, SectionTitle, Stat } from "@/components/ui/primitives";
+import { Card, SectionTitle, Stat, EmptyHint } from "@/components/ui/primitives";
 import { DeleteButton } from "./DeleteButton";
 
 export function CookingView({ profile, range }: { profile: ProfileView; assessment: DomainAssessment; range: 7 | 30 | 90 }) {
@@ -82,7 +82,7 @@ export function CookingView({ profile, range }: { profile: ProfileView; assessme
       <Card className="p-0">
         <div className="px-4 pt-3.5 pb-2 text-sm font-semibold">Recent meals</div>
         {inRange.length === 0 ? (
-          <p className="px-4 pb-5 text-sm text-muted">Nothing cooked in this range yet.</p>
+          <EmptyHint text="Nothing cooked yet." action="Log a meal" href="?log=food" />
         ) : (
           <ul className="divide-y divide-border/70">
             {[...inRange].reverse().slice(0, 15).map((m) => (

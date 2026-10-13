@@ -18,10 +18,15 @@ import { awardXp, voidXpForSource, type XpAward } from "./xp";
  *  - Declining does nothing except mark the offer declined. No XP, rank, streak or score effect — ever.
  *  - Offers expire quietly.
  */
-const FREQ: Record<QuestFrequency, { perDay: number; maxPerDay: number }> = {
-  low: { perDay: 0.6, maxPerDay: 1 },
-  normal: { perDay: 1.1, maxPerDay: 2 },
-  high: { perDay: 1.8, maxPerDay: 2 },
+/**
+ * How often a special quest appears. "Special" means occasional: on normal,
+ * at most one a day and roughly every other day (it was up to two a day).
+ * minGapHours keeps them from landing on consecutive mornings.
+ */
+const FREQ: Record<QuestFrequency, { perDay: number; maxPerDay: number; minGapHours: number }> = {
+  low: { perDay: 0.4, maxPerDay: 1, minGapHours: 44 },
+  normal: { perDay: 0.75, maxPerDay: 1, minGapHours: 20 },
+  high: { perDay: 1.8, maxPerDay: 2, minGapHours: 3 }, // asked for many: unchanged
 };
 
 /** Deterministic pseudo-random in [0,1) for a date + slot so reloads don't re-roll. */
@@ -112,13 +117,18 @@ export async function maybeOffer(input: OfferEngineInput): Promise<QuestOffer | 
   }
   // Quiet hours.
   if (input.localHour < 7 || input.localHour >= 23) return null;
+  // Spacing across days: not one every single morning.
+  const lastAny = db.select().from(questOffers).orderBy(desc(questOffers.id)).limit(1).get();
+  const sinceLast = lastAny ? input.now.getTime() - new Date(lastAny.offeredAt).getTime() : Infinity;
+  if (sinceLast >= 0 && sinceLast < cfg.minGapHours * 3600_000) return null;
 
   // Three slots per day (morning / afternoon / evening); each slot rolls once.
   const slot = input.localHour < 12 ? "am" : input.localHour < 17 ? "pm" : "eve";
   const p = Math.min(0.85, cfg.perDay / 3 + (todays.length === 0 && slot === "eve" ? 0.15 : 0));
   if (roll(`${input.today}:${slot}:offer`) > p) return null;
 
-  const recent = db.select().from(questOffers).where(gte(questOffers.date, addDays(input.today, -7))).all();
+  // Not the same quest twice in two weeks.
+  const recent = db.select().from(questOffers).where(gte(questOffers.date, addDays(input.today, -14))).all();
   const recentKeys = new Set(recent.map((r) => r.templateKey).filter(Boolean));
   const recentTitles = recent.map((r) => r.title);
 
@@ -126,7 +136,9 @@ export async function maybeOffer(input: OfferEngineInput): Promise<QuestOffer | 
   const pool = QUEST_LIBRARY.filter((q) => !recentKeys.has(q.key))
     .filter((q) => !q.window || (input.localHour >= q.window[0] && input.localHour <= q.window[1]))
     .map((q) => ({ q, w: q.weight(input.signals) }))
-    .filter((x) => x.w > 0);
+    // A trivial quest ("add a protein snack", +20 XP) is only worth a special
+    // slot when today's signals call for it; never as a random pick.
+    .filter((x) => x.w > 0 && (x.q.difficulty !== "common" || x.w >= 2));
 
   let candidate: ValidatedCandidate | null = null;
   // Occasionally (30%) let the AI propose one, if available and valid.

@@ -66,7 +66,7 @@ export function HabitList({ today, habits, stats }: { today: string; habits: Hab
             {active.filter((h) => local[h.id] ?? statOf(h.id)?.doneToday).length}/{active.length} today
           </span>
         </div>
-        {active.length === 0 && <p className="px-4 pb-5 text-sm text-muted">No habits yet. Add one below — start with two or three.</p>}
+        {active.length === 0 && <p className="px-4 pb-5 text-sm text-muted">No habits yet. Start with two.</p>}
         <ul className="divide-y divide-border/70">
           {active.map((h) => {
             const s = statOf(h.id);

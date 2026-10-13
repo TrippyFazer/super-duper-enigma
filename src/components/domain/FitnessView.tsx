@@ -6,7 +6,7 @@ import { healthSources } from "@/health/sources";
 import { addDays, formatShort, formatWeekdayShort, lastNDays, startOfWeek } from "@/lib/dates";
 import { LogHereButton } from "@/components/log/LogHereButton";
 import { BarsChart, DayHeatmap } from "@/components/charts/Charts";
-import { Card, SectionTitle, Stat } from "@/components/ui/primitives";
+import { Card, SectionTitle, Stat, EmptyHint } from "@/components/ui/primitives";
 import { DeleteButton } from "./DeleteButton";
 
 const ICON: Record<string, typeof Dumbbell> = { strength: Dumbbell, cardio: HeartPulse, walk: Footprints, sport: Trophy, mobility: StretchHorizontal, other: CircleDot };
@@ -61,7 +61,7 @@ export function FitnessView({ profile, assessment, range }: { profile: ProfileVi
       <Card className="p-0">
         <div className="px-4 pt-3.5 pb-2 text-sm font-semibold">Recent workouts</div>
         {inRange.length === 0 ? (
-          <p className="px-4 pb-5 text-sm text-muted">No workouts in this range. {assessment.suggestedAction ?? "Log one above."}</p>
+          <EmptyHint text="No workouts yet." action="Log a workout" href="?log=workout" />
         ) : (
           <ul className="divide-y divide-border/70">
             {[...inRange].reverse().slice(0, 15).map((w) => {

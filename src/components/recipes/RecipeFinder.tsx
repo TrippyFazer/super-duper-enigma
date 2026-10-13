@@ -152,7 +152,7 @@ export function RecipeFinder({ recipes }: { recipes: RecipeCard[]; today: string
       </div>
 
       <div className="space-y-2.5">
-        {results.length === 0 && <div className="card p-6 text-center text-sm text-muted">Nothing matches. Try fewer filters, or add a recipe of your own.</div>}
+        {results.length === 0 && <div className="card p-6 text-center text-sm text-muted">Nothing matches. Try fewer filters.</div>}
         {results.map(({ r, matched, missing }) => (
           <Link key={r.id} href={`/recipes/${r.id}`} className="card press block p-4">
             <div className="flex items-start gap-3">
