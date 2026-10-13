@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.4.0 — 2026-10-13 · "Organize it" (UX refactor)
+
+Product review pass. No ranking logic changed; nothing deep removed. Full audit with problem / why / change in `docs/ux-audit.md`.
+
+* **Universal + LOG**: one floating button above the nav on every tab → Food · Workout · Sleep · Routine/Habit · More, ordered by recent use. Deep link `?log=…` on any page.
+* **One food logger** everywhere (Recent · Search · Restaurant · Quick · Estimate · Recipe), meal type inferred from the clock and editable, one tap select + one tap confirm, "I cooked this" on the draft so one action updates nutrition and cooking (XP once). Cooked-meal-only sheet removed.
+* **Home = Today**: hero → one context card (special quest › Sunday reset › morning motivation › wind-down › weekly review) → one Today card (Workout / Nutrition / Steps / Sleep / Quests / Routines & habits rows) → compact progression strip → Next rank with per-domain NEEDS.
+* **Planner = Future**: This week · Weekly preparation (Sunday reset / Groceries / Meal prep deep links) · Food · Tools. Dashboard duplication removed.
+* **Food screen IA**: Today → + FOOD → Eaten → Remaining plan; rows show kcal · protein; carbs/fat behind details; delete with UNDO.
+* **Workout tracker**: Copy last, equipment-aware −/+ weight steppers, auto-focus next field, plain-language session menu; split into header / exercise card / set row / menus.
+* **Health sources centralised** (`health/sources.ts`): manual sleep/steps shown only when no automatic source has real samples; Oura UI marked legacy and collapsed.
+* Tap targets ≥44 px, quieter daily copy, UNDO toasts for lightweight actions, large components split (NutritionLog, SessionTracker, WeekPlanner, PlannerSettings). 128 tests.
+
 ## 0.3.0 — 2026-10-13 · "Real life is messy"
 
 Product-quality pass from beta testing: the app now separates **plan** from **reality**, and every record can be corrected.

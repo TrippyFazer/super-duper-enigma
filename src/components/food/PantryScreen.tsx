@@ -167,7 +167,7 @@ export function PantryScreen({ items, aiEnabled }: { items: PantryVM[]; aiEnable
                     </button>
                   ))}
                 </div>
-                <button aria-label={`Remove ${it.name}`} disabled={pending} onClick={() => start(async () => { await deletePantryAction(it.id); router.refresh(); })} className="press flex h-8 w-8 items-center justify-center rounded-full text-faint hover:text-danger">
+                <button aria-label={`Remove ${it.name}`} disabled={pending} onClick={() => start(async () => { await deletePantryAction(it.id); router.refresh(); })} className="press flex h-11 w-11 items-center justify-center rounded-full text-faint hover:text-danger">
                   <Trash2 size={13} />
                 </button>
               </li>

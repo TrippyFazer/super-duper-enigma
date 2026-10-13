@@ -1,15 +1,14 @@
 import Link from "next/link";
-import { Watch } from "lucide-react";
+import { HeartPulse } from "lucide-react";
 import type { DomainAssessment } from "@/ranking/types";
 import type { ProfileView } from "@/services/profile";
 import { loadSleep } from "@/services/loaders";
-import { getOuraStatus } from "@/integrations/oura/sync";
+import { healthSources } from "@/health/sources";
 import { formatMinutes, formatShort, lastNDays, minutesToHhmm } from "@/lib/dates";
 import { circularMeanMinutes, mean } from "@/ranking/scale";
-import { QuickLog } from "@/components/log/QuickLog";
+import { LogHereButton } from "@/components/log/LogHereButton";
 import { SleepChart, DayHeatmap } from "@/components/charts/Charts";
 import { Card, SectionTitle, Stat } from "@/components/ui/primitives";
-import { OuraSyncButton } from "./OuraSyncButton";
 import { DeleteButton } from "./DeleteButton";
 import { SleepScheduleCard } from "@/components/sleep/SleepScheduleCard";
 import { compareNight, computeSleepSchedule } from "@/services/sleepPlan";
@@ -21,7 +20,7 @@ function clock(iso: string | null | undefined): number | null {
 
 export function SleepView({ profile, range }: { profile: ProfileView; assessment: DomainAssessment; range: 7 | 30 | 90 }) {
   const today = profile.today;
-  const oura = getOuraStatus();
+  const sources = healthSources();
   const entries = loadSleep(today);
   const days = lastNDays(today, range);
   const inRange = entries.filter((e) => e.date >= days[0]);
@@ -44,21 +43,25 @@ export function SleepView({ profile, range }: { profile: ProfileView; assessment
   return (
     <div className="space-y-4">
       <SleepScheduleCard sched={sched} lastNight={lastVs} />
-      {oura.connected && oura.enabled ? (
+      {sources.sleepAutomatic ? (
         <div className="card flex items-center gap-3 px-4 py-3">
-          <Watch size={18} className="text-gold" />
+          <HeartPulse size={18} className="text-gold" />
           <div className="min-w-0 flex-1">
-            <div className="text-sm font-medium">Oura connected</div>
-            <div className="truncate text-xs text-muted">{oura.lastSyncAt ? `Last sync ${new Date(oura.lastSyncAt).toLocaleString()}` : "Not synced yet"}{oura.lastError ? ` · ${oura.lastError}` : ""}</div>
+            <div className="text-sm font-medium">Sleep from {sources.sleepSourceLabel}</div>
+            <div className="truncate text-xs text-muted">{sources.apple.lastSyncAt ? `Last sync ${new Date(sources.apple.lastSyncAt).toLocaleString()}` : "Synced automatically"}</div>
           </div>
-          <OuraSyncButton />
+          <Link href="/profile/settings/services" className="press flex h-10 items-center rounded-full border border-border px-3 text-xs text-text-2">
+            Sources
+          </Link>
         </div>
       ) : (
         <>
-          <QuickLog today={today} activeDomains={["sleep"]} recipes={[]} stepsTarget={profile.targets.stepsTarget} bedtimeTarget={profile.targets.bedtimeTarget} hasOura={false} variant="buttons" only={["sleep"]} />
-          <Link href="/profile/settings#oura" className="flex items-center gap-2 rounded-xl border border-border bg-surface px-4 py-2.5 text-xs text-muted">
-            <Watch size={14} className="text-gold" /> Have an Oura Ring? Connect it in settings to sync sleep, readiness and steps automatically.
-          </Link>
+          <LogHereButton kind="sleep" label="Log last night" />
+          {!sources.anyConnected && (
+            <Link href="/profile/settings/services" className="flex min-h-11 items-center gap-2 rounded-xl border border-border bg-surface px-4 py-2 text-xs text-muted">
+              <HeartPulse size={14} className="text-gold" /> Connect Apple Health to fill this in automatically.
+            </Link>
+          )}
         </>
       )}
 
@@ -69,8 +72,8 @@ export function SleepView({ profile, range }: { profile: ProfileView; assessment
       </div>
       {(hrv.length > 0 || rhr.length > 0) && (
         <div className="grid grid-cols-2 gap-2.5">
-          <Stat label="HRV" value={hrv.length ? `${Math.round(mean(hrv))} ms` : "—"} sub="average (Oura)" />
-          <Stat label="Resting HR" value={rhr.length ? `${Math.round(mean(rhr))} bpm` : "—"} sub="lowest nightly (Oura)" />
+          <Stat label="HRV" value={hrv.length ? `${Math.round(mean(hrv))} ms` : "—"} sub="nightly average" />
+          <Stat label="Resting HR" value={rhr.length ? `${Math.round(mean(rhr))} bpm` : "—"} sub="lowest nightly" />
         </div>
       )}
 

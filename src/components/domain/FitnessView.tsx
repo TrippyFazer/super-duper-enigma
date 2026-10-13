@@ -2,9 +2,9 @@ import { Dumbbell, HeartPulse, Footprints, Trophy, StretchHorizontal, CircleDot 
 import type { DomainAssessment } from "@/ranking/types";
 import type { ProfileView } from "@/services/profile";
 import { loadActivity, loadWorkouts } from "@/services/loaders";
-import { getOuraStatus } from "@/integrations/oura/sync";
+import { healthSources } from "@/health/sources";
 import { addDays, formatShort, formatWeekdayShort, lastNDays, startOfWeek } from "@/lib/dates";
-import { QuickLog } from "@/components/log/QuickLog";
+import { LogHereButton } from "@/components/log/LogHereButton";
 import { BarsChart, DayHeatmap } from "@/components/charts/Charts";
 import { Card, SectionTitle, Stat } from "@/components/ui/primitives";
 import { DeleteButton } from "./DeleteButton";
@@ -15,7 +15,7 @@ export function FitnessView({ profile, assessment, range }: { profile: ProfileVi
   const today = profile.today;
   const workouts = loadWorkouts(today);
   const activity = loadActivity(today);
-  const oura = getOuraStatus();
+  const sources = healthSources();
   const days = lastNDays(today, range);
   const inRange = workouts.filter((w) => w.date >= days[0]);
   const minutes = inRange.reduce((a, w) => a + w.durationMin, 0);
@@ -40,12 +40,12 @@ export function FitnessView({ profile, assessment, range }: { profile: ProfileVi
 
   return (
     <div className="space-y-4">
-      <QuickLog today={today} activeDomains={["fitness"]} recipes={[]} stepsTarget={profile.targets.stepsTarget} bedtimeTarget={null} hasOura={oura.enabled && oura.connected} variant="buttons" />
+      <LogHereButton kind="workout" label="Log a workout" />
 
       <div className="grid grid-cols-3 gap-2.5">
         <Stat label="Sessions" value={new Set(inRange.map((w) => w.date)).size} sub={`${range} days`} />
         <Stat label="Minutes" value={minutes.toLocaleString()} sub={`${Math.round((minutes / range) * 7)}/wk`} />
-        <Stat label="Steps" value={avgSteps != null ? avgSteps.toLocaleString() : "—"} sub={avgSteps != null ? "avg/day" : oura.connected ? "syncing" : "log or sync"} />
+        <Stat label="Steps" value={avgSteps != null ? avgSteps.toLocaleString() : "—"} sub={avgSteps != null ? `avg/day${sources.stepsSourceLabel ? ` · ${sources.stepsSourceLabel}` : ""}` : sources.stepsAutomatic ? "no samples yet" : "not tracked"} />
       </div>
 
       <Card>

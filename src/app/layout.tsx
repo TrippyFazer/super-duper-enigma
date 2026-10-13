@@ -20,7 +20,9 @@ const cormorant = localFont({
   variable: "--font-cormorant",
   display: "swap",
 });
+import { Suspense } from "react";
 import { BottomNav } from "@/components/nav/BottomNav";
+import { LogFab } from "@/components/log/LogFab";
 import { FeedbackProvider } from "@/components/feedback/FeedbackProvider";
 import { ServiceWorker } from "@/components/pwa/ServiceWorker";
 
@@ -51,6 +53,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <FeedbackProvider>
           <main className="min-h-dvh">{children}</main>
+          <Suspense>
+            <LogFab />
+          </Suspense>
           <BottomNav />
         </FeedbackProvider>
         <ServiceWorker />

@@ -85,7 +85,7 @@ export function ShoppingList({ weekId, status, items, budget, embedded }: { week
                       {it.note ? ` · ${it.note}` : ""}
                     </div>
                   </div>
-                  <button aria-label={`Edit ${it.name}`} onClick={() => setEditing(it)} className="press flex h-8 w-8 items-center justify-center rounded-full text-faint hover:bg-white/5">
+                  <button aria-label={`Edit ${it.name}`} onClick={() => setEditing(it)} className="press flex h-11 w-11 items-center justify-center rounded-full text-faint hover:bg-white/5">
                     <Pencil size={13} />
                   </button>
                 </li>

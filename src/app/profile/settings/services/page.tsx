@@ -19,10 +19,18 @@ export default async function ServicesPage({ searchParams }: { searchParams: Pro
   const appUrl = process.env.APP_URL || "http://localhost:3000";
   return (
     <div className="page space-y-5">
-      <PageHeader title="Connected services" subtitle="Where your health data comes from. Manual logging always works." back="/profile/settings" />
+      <PageHeader title="Connected services" subtitle="Apple Health is the primary source. Manual logging always works." back="/profile/settings" />
       <AppleHealthSettings status={health} appUrl={appUrl} sampleCount={sampleCount()} pending={pendingWorkoutMatches().map((p) => ({ id: p.id, activityType: p.activityType, startAt: p.startAt, durationMin: p.durationMin, sourceName: p.sourceName, suggested: p.suggested ? { id: p.suggested.id, type: p.suggested.type, durationMin: p.suggested.durationMin, date: p.suggested.date, notes: p.suggested.notes } : null }))} />
-      <OuraSettings status={oura} oauthAvailable={oauthConfigured()} flash={sp.oura === "connected" ? "Oura connected." : sp.error ? `Oura error: ${sp.error}` : null} />
-      <p className="serif px-1 text-[12.5px] text-muted">Oura direct sync is optional. If your ring already writes to Apple Health, connect Apple Health instead and leave this off to avoid double-counting.</p>
+      <details open={oura.connected || !!sp.oura || !!sp.error} className="group">
+        <summary className="press flex min-h-11 cursor-pointer list-none items-center gap-2 px-1 text-xs text-muted">
+          <span className="eyebrow">Legacy · Oura direct sync</span>
+          <span className="ml-auto">{oura.connected ? "connected" : "show"}</span>
+        </summary>
+        <div className="mt-2 space-y-2">
+          <OuraSettings status={oura} oauthAvailable={oauthConfigured()} flash={sp.oura === "connected" ? "Oura connected." : sp.error ? `Oura error: ${sp.error}` : null} />
+          <p className="serif px-1 text-[12.5px] text-muted">If your ring already writes to Apple Health, leave this off to avoid double-counting.</p>
+        </div>
+      </details>
     </div>
   );
 }

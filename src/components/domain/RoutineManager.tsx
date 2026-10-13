@@ -65,7 +65,7 @@ export function RoutineManager({ today, routines, completions }: { today: string
               <div className="flex items-center gap-2.5 px-4 pt-3.5 pb-2">
                 {r.timeOfDay === "morning" ? <Sun size={16} className="text-gold" /> : <Moon size={16} className="text-accent-2" />}
                 <div className="flex-1 text-sm font-semibold">{r.name}</div>
-                <button aria-label="Edit routine" onClick={() => setEditing(r)} className="press flex h-8 w-8 items-center justify-center rounded-full text-faint hover:bg-white/5">
+                <button aria-label="Edit routine" onClick={() => setEditing(r)} className="press flex h-11 w-11 items-center justify-center rounded-full text-faint hover:bg-white/5">
                   <Pencil size={14} />
                 </button>
                 {done ? (

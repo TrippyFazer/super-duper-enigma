@@ -39,7 +39,7 @@ export function AdjustDayCard({ unplanned, onDismiss }: { unplanned: string; onD
             {proposal === undefined ? "Working out what still fits…" : `${unplanned} changed the day. ${proposal.remainingCalories > 0 ? `${proposal.remainingCalories} kcal and ${Math.max(0, proposal.remainingProtein)} g protein left.` : "You're past today's calorie target — that's fine; here is the lightest way to finish."}`}
           </p>
         </div>
-        <button onClick={onDismiss} aria-label="Dismiss" className="press flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-faint hover:bg-white/5">
+        <button onClick={onDismiss} aria-label="Dismiss" className="press flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-faint hover:bg-white/5">
           <X size={16} />
         </button>
       </div>

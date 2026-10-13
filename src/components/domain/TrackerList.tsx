@@ -67,7 +67,7 @@ export function TrackerList({ trackers, milestones }: { trackers: TrackerItem[];
             <div className="flex items-center gap-2">
               <ShieldCheck size={16} className="text-gold" />
               <div className="flex-1 text-sm font-semibold">{t.name}</div>
-              <button aria-label="Tracker settings" onClick={() => setEditing(t)} className="press flex h-8 w-8 items-center justify-center rounded-full text-faint hover:bg-white/5">
+              <button aria-label="Tracker settings" onClick={() => setEditing(t)} className="press flex h-11 w-11 items-center justify-center rounded-full text-faint hover:bg-white/5">
                 <Settings2 size={15} />
               </button>
             </div>

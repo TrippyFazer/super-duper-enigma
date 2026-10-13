@@ -27,7 +27,7 @@ export function DeleteButton({ kind, id, confirm = "Delete this entry? Any XP it
           await (ACTIONS[kind] as (id: number | string) => Promise<unknown>)(id);
         });
       }}
-      className="press flex h-8 w-8 items-center justify-center rounded-full text-faint hover:bg-danger/15 hover:text-danger disabled:opacity-40"
+      className="press flex h-11 w-11 items-center justify-center rounded-full text-faint hover:bg-danger/15 hover:text-danger disabled:opacity-40"
     >
       <Trash2 size={14} />
     </button>

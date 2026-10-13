@@ -87,6 +87,10 @@ tests/            Vitest suites for the engine and the progression service
 
 Stack: Next.js 15 (App Router, server actions), React 19, TypeScript, Tailwind 4, Drizzle ORM + better-sqlite3, Zod, Recharts, Motion. PWA via web manifest + a small service worker.
 
+## Logging
+
+One floating **+ LOG** button on every tab opens Food · Workout · Sleep · Routine/Habit · More (ordered by what you log most). Food logging is one sheet everywhere: Recent, Search, Restaurant, Quick macros, Estimate, Recipe, with "I cooked this" on the confirm step. The UX audit behind the 0.4.0 layout is in `docs/ux-audit.md`.
+
 ## How ranking works (short version)
 
 * Each domain computes a 0–100 score from rolling 30/90-day windows of your logs, through anchor tables placed at research thresholds (e.g. 150 moderate minutes/week ≈ median → 50).
@@ -117,6 +121,6 @@ Everything lives in `data/ascend.db` on the machine running the app. Financial f
 ## Testing
 
 ```bash
-npm test          # 118 tests: engine, XP ledger, quests, achievements, quest offers (no-penalty decline, expiry, XP bands, guardrails), AI contracts + fallback + cache, workout sessions/PRs, nutrition + meal plans
+npm test          # 128 tests: engine, XP ledger, quests, achievements, quest offers (no-penalty decline, expiry, XP bands, guardrails), AI contracts + fallback + cache, workout sessions/PRs, nutrition + meal plans, UX rules (health sources, + LOG ordering, meal-type inference, weight steppers)
 npm run typecheck
 ```

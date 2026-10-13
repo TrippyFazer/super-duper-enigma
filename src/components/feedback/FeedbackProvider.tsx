@@ -12,6 +12,14 @@ interface Toast {
   kind: "xp" | "quest" | "error";
   text: string;
   sub?: string;
+  /** Optional inline action, e.g. UNDO. Toasts with an action stay longer. */
+  action?: { label: string; onClick: () => void | Promise<void> };
+}
+
+export interface ToastOptions {
+  sub?: string;
+  action?: { label: string; onClick: () => void | Promise<void> };
+  durationMs?: number;
 }
 
 interface Celebration {
@@ -27,7 +35,10 @@ interface Celebration {
 
 interface FeedbackApi {
   notify: (f: ActionFeedback) => void;
-  toast: (text: string, kind?: Toast["kind"], sub?: string) => void;
+  /** `sub` may be a string (legacy) or options with an action / duration. */
+  toast: (text: string, kind?: Toast["kind"], sub?: string | ToastOptions) => void;
+  /** Quiet confirmation with an UNDO affordance — use instead of confirm() for lightweight actions. */
+  undoable: (text: string, onUndo: () => void | Promise<void>, sub?: string) => void;
 }
 
 const Ctx = createContext<FeedbackApi | null>(null);
@@ -43,11 +54,16 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
   const [queue, setQueue] = useState<Celebration[]>([]);
   const idRef = useRef(1);
 
-  const toast = useCallback((text: string, kind: Toast["kind"] = "xp", sub?: string) => {
+  const toast = useCallback((text: string, kind: Toast["kind"] = "xp", sub?: string | ToastOptions) => {
     const id = idRef.current++;
-    setToasts((t) => [...t, { id, kind, text, sub }].slice(-3));
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 2600);
+    const opts: ToastOptions = typeof sub === "string" ? { sub } : (sub ?? {});
+    setToasts((t) => [...t, { id, kind, text, sub: opts.sub, action: opts.action }].slice(-3));
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), opts.durationMs ?? (opts.action ? 5200 : 2600));
   }, []);
+  const undoable = useCallback(
+    (text: string, onUndo: () => void | Promise<void>, sub?: string) => toast(text, "quest", { sub, action: { label: "Undo", onClick: onUndo } }),
+    [toast],
+  );
 
   const notify = useCallback(
     (f: ActionFeedback) => {
@@ -76,7 +92,7 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
     [toast],
   );
 
-  const api = useMemo(() => ({ notify, toast }), [notify, toast]);
+  const api = useMemo(() => ({ notify, toast, undoable }), [notify, toast, undoable]);
   const current = queue[0];
   const dismiss = () => setQueue((q) => q.slice(1));
 
@@ -107,6 +123,18 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
               {t.kind === "xp" ? <Zap size={16} className="text-gold" /> : t.kind === "quest" ? <Sparkles size={16} className="text-accent-2" /> : null}
               <span className="tabular font-semibold">{t.text}</span>
               {t.sub && <span className="truncate text-xs text-muted">{t.sub}</span>}
+              {t.action && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setToasts((list) => list.filter((x) => x.id !== t.id));
+                    await t.action!.onClick();
+                  }}
+                  className="press -my-1 -mr-2 ml-1 flex h-9 items-center rounded-full px-3 text-xs font-semibold uppercase tracking-wider text-gold"
+                >
+                  {t.action.label}
+                </button>
+              )}
             </motion.div>
           ))}
         </AnimatePresence>
