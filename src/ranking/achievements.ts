@@ -37,7 +37,7 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     key: "character_created",
     name: "A New Adventurer",
     description: "Complete onboarding and create your character.",
-    title: "Adventurer",
+    title: "Novice Squire",
     xp: 0,
     domain: "system",
     check: () => true,
@@ -51,7 +51,7 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     key: "consistency_over_motivation",
     name: "Consistency > Motivation",
     description: "12 consecutive weeks with 3+ training days.",
-    title: "Consistency > Motivation",
+    title: "The Consistent",
     xp: 500,
     domain: "fitness",
     check: (c) => c.fitness.activeWeekStreak >= 12,
@@ -95,23 +95,23 @@ export const ACHIEVEMENTS: AchievementDef[] = [
 
   // --- Habits ----------------------------------------------------------------
   { key: "habit_first", name: "Small Beginnings", description: "Complete your first habit.", xp: 10, domain: "habits", check: (c) => c.habits.totalCompletions >= 1 },
-  { key: "iron_habit", name: "Iron Habit", description: "30-day streak on a single habit.", title: "Iron Habit", xp: 250, domain: "habits", check: (c) => c.habits.bestStreak >= 30 },
+  { key: "iron_habit", name: "Iron Habit", description: "30-day streak on a single habit.", title: "Iron Disciple", xp: 250, domain: "habits", check: (c) => c.habits.bestStreak >= 30 },
   { key: "habit_66", name: "Automatic", description: "66-day streak — the median time to form a habit.", title: "Automatic", xp: 400, domain: "habits", check: (c) => c.habits.bestStreak >= 66 },
   { key: "habit_100", name: "Hundredfold", description: "100 habit completions.", xp: 150, domain: "habits", check: (c) => c.habits.totalCompletions >= 100 },
 
   // --- Wealth ----------------------------------------------------------------
   { key: "financial_apprentice", name: "Financial Apprentice", description: "Complete your first financial check-in.", title: "Financial Apprentice", xp: 25, domain: "wealth", check: (c) => c.wealth.snapshots >= 1 },
   { key: "quartermaster", name: "Quartermaster", description: "Three monthly financial check-ins.", title: "Quartermaster", xp: 100, domain: "wealth", check: (c) => c.wealth.snapshots >= 3 },
-  { key: "investor", name: "Investor", description: "Invest monthly across three check-ins.", title: "Investor", xp: 150, domain: "wealth", check: (c) => c.wealth.investsMonthlyCount >= 3 },
+  { key: "investor", name: "Investor", description: "Invest monthly across three check-ins.", title: "The Investor", xp: 150, domain: "wealth", check: (c) => c.wealth.investsMonthlyCount >= 3 },
   { key: "rainy_day", name: "Rainy Day Fund", description: "Hold 3+ months of expenses in liquid savings.", xp: 200, domain: "wealth", check: (c) => (c.wealth.emergencyMonths ?? 0) >= 3 },
   { key: "fortress", name: "Fortress", description: "Hold 6+ months of expenses with no high-interest debt.", title: "Fortress", xp: 400, domain: "wealth", check: (c) => (c.wealth.emergencyMonths ?? 0) >= 6 && c.wealth.noHighInterestDebt === true },
 
   // --- Ranks & levels --------------------------------------------------------
-  { key: "rank_d", name: "D-Rank Adventurer", description: "Reach D rank overall.", title: "D-Rank Adventurer", xp: 100, domain: "overall", check: (c) => overallAtLeast(c, "D") },
-  { key: "rank_c", name: "C-Rank Adventurer", description: "Reach C rank overall.", title: "C-Rank Adventurer", xp: 250, domain: "overall", check: (c) => overallAtLeast(c, "C") },
-  { key: "rank_b", name: "B-Rank Adventurer", description: "Reach B rank overall.", title: "B-Rank Adventurer", xp: 500, domain: "overall", check: (c) => overallAtLeast(c, "B") },
-  { key: "rank_a", name: "A-Rank Adventurer", description: "Reach A rank overall.", title: "A-Rank Adventurer", xp: 1000, domain: "overall", check: (c) => overallAtLeast(c, "A") },
-  { key: "rank_s", name: "S-Rank Adventurer", description: "Reach S rank overall.", title: "S-Rank Adventurer", xp: 2500, domain: "overall", check: (c) => overallAtLeast(c, "S") },
+  { key: "rank_d", name: "D-Rank Adventurer", description: "Reach D rank overall.", title: "Rising Adventurer", xp: 100, domain: "overall", check: (c) => overallAtLeast(c, "D") },
+  { key: "rank_c", name: "C-Rank Adventurer", description: "Reach C rank overall.", title: "Seasoned Knight", xp: 250, domain: "overall", check: (c) => overallAtLeast(c, "C") },
+  { key: "rank_b", name: "B-Rank Adventurer", description: "Reach B rank overall.", title: "Elite Knight", xp: 500, domain: "overall", check: (c) => overallAtLeast(c, "B") },
+  { key: "rank_a", name: "A-Rank Adventurer", description: "Reach A rank overall.", title: "Royal Champion", xp: 1000, domain: "overall", check: (c) => overallAtLeast(c, "A") },
+  { key: "rank_s", name: "S-Rank Adventurer", description: "Reach S rank overall.", title: "Legendary Paladin", xp: 2500, domain: "overall", check: (c) => overallAtLeast(c, "S") },
   { key: "level_10", name: "Level 10", description: "Reach character level 10.", xp: 0, domain: "system", check: (c) => c.xp.level >= 10 },
   { key: "level_25", name: "Level 25", description: "Reach character level 25.", title: "Seasoned", xp: 0, domain: "system", check: (c) => c.xp.level >= 25 },
   { key: "level_50", name: "Level 50", description: "Reach character level 50.", title: "Veteran", xp: 0, domain: "system", check: (c) => c.xp.level >= 50 },
@@ -119,6 +119,17 @@ export const ACHIEVEMENTS: AchievementDef[] = [
   { key: "domain_s_any", name: "Legend", description: "Reach S rank in any domain.", title: "Legend", xp: 1000, domain: "overall", check: (c) => c.assessment.domains.some((d) => d.rank === "S") },
   { key: "balanced", name: "Balanced", description: "Hold C rank or better in every active domain.", title: "Balanced", xp: 300, domain: "overall", check: (c) => c.assessment.domains.length >= 3 && c.assessment.domains.every((d) => rankIndex(d.rank) >= rankIndex("C")) },
   { key: "fitness_b", name: "Strong Body", description: "Reach B rank in Fitness.", xp: 200, domain: "fitness", check: (c) => rankAtLeast(c, "fitness", "B") },
+
+  // --- Training, nutrition, special quests ------------------------------------
+  { key: "first_session", name: "Under the Bar", description: "Finish your first tracked workout session.", xp: 40, domain: "fitness", check: (c) => c.training.sessions >= 1 },
+  { key: "sessions_20", name: "Regular at the Forge", description: "Finish 20 tracked sessions.", xp: 150, domain: "fitness", check: (c) => c.training.sessions >= 20 },
+  { key: "first_pr", name: "Trailblazer", description: "Set a personal record on a tracked lift.", title: "Trailblazer", xp: 75, domain: "fitness", check: (c) => c.training.prs >= 1 },
+  { key: "prs_10", name: "Overload", description: "Set 10 personal records on tracked lifts.", xp: 200, domain: "fitness", check: (c) => c.training.prs >= 10 },
+  { key: "nutrition_7", name: "Quartermaster's Ledger", description: "Log nutrition on 7 days in a month.", xp: 60, domain: "cooking", check: (c) => c.nutrition.loggedDays30 >= 7 },
+  { key: "protein_14", name: "Well Fed", description: "Hit your protein target on 14 logged days in a month.", title: "Well Fed", xp: 150, domain: "cooking", check: (c) => !c.nutrition.unsafeTargets && c.nutrition.proteinDays30 >= 14 },
+  { key: "special_first", name: "Side Quest", description: "Complete your first special quest.", xp: 30, domain: "overall", check: (c) => c.special.completed >= 1 },
+  { key: "special_10", name: "Errand Knight", description: "Complete 10 special quests.", title: "Errand Knight", xp: 150, domain: "overall", check: (c) => c.special.completed >= 10 },
+  { key: "special_30", name: "Wanderer", description: "Complete 30 special quests.", title: "Wanderer", xp: 400, domain: "overall", check: (c) => c.special.completed >= 30 },
   { key: "sleep_b", name: "Deep Rest", description: "Reach B rank in Sleep.", xp: 200, domain: "sleep", check: (c) => rankAtLeast(c, "sleep", "B") },
 ];
 

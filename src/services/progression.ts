@@ -1,6 +1,6 @@
-import { and, desc, eq, gte, lte } from "drizzle-orm";
+import { and, desc, eq, gte, like, lte } from "drizzle-orm";
 import { getDb } from "@/db/client";
-import { characterEvents, quests, rankHistory, scoreSnapshots, userAchievements, type Quest } from "@/db/schema";
+import { characterEvents, quests, rankHistory, scoreSnapshots, userAchievements, xpEvents, type Quest } from "@/db/schema";
 import { addDays, dateInTz, diffDays, endOfWeek, lastNDays, startOfWeek, hhmmToMinutes, type ISODate } from "@/lib/dates";
 import { parseJson, toJson } from "@/lib/json";
 import { ACHIEVEMENT_MAP, evaluateAchievements, type AchievementDef } from "@/ranking/achievements";
@@ -31,6 +31,14 @@ import {
 } from "./loaders";
 import { getProfile, updateProfile, type ProfileView } from "./profile";
 import { awardXp, totalXp } from "./xp";
+import { recordEvent } from "./events";
+import { strengthProgress, recentSessions, getPlanForDate } from "./workouts";
+import { nutritionConsistency, resolveTargets, dayTotals } from "./nutrition";
+import { pushNotification } from "./notifications";
+import { listOffers, offersCompletedCount } from "./questOffers";
+import { RANK_VISUALS } from "@/ranking/rankVisuals";
+import { SAFE_MIN_CALORIES } from "./preferences";
+export { recordEvent } from "./events";
 
 // ---------------------------------------------------------------------------
 // Engine input
@@ -54,6 +62,7 @@ export function buildEngineInput(profile: ProfileView): EngineInput {
       },
       startedOn,
       stepsTarget: profile.targets.stepsTarget,
+      strength: strengthProgress(today),
     },
     sleep: {
       asOf: today,
@@ -80,6 +89,11 @@ export function buildEngineInput(profile: ProfileView): EngineInput {
       baseline: { mealsCookedPerWeek: profile.baseline.mealsCookedPerWeek },
       startedOn,
       mealsPerWeekTarget: profile.targets.mealsPerWeekTarget,
+      nutrition: (() => {
+        const t = resolveTargets(profile.preferences.nutrition, profile);
+        const c = nutritionConsistency(today, 30, t.protein, SAFE_MIN_CALORIES(profile.sex));
+        return c.loggedDays > 0 && !t.unsafe ? c : null;
+      })(),
     },
     wealth: {
       asOf: today,
@@ -295,6 +309,23 @@ export function buildContext(profile: ProfileView, input: EngineInput, assessmen
     },
     xp: { total: xp, level: levelFromXp(xp).level },
     unlocked,
+    special: (() => {
+      const offers = listOffers({ limit: 200 });
+      return { completed: offersCompletedCount(), accepted: offers.filter((o) => o.status === "accepted").length, offeredToday: offers.filter((o) => o.date === today).length };
+    })(),
+    training: (() => {
+      const sessions = recentSessions(400, today);
+      // A "PR" for achievements means an improvement over a previous record (baselines don't count).
+      const prs = getDb().select({ key: xpEvents.key }).from(xpEvents).where(like(xpEvents.key, "personal_record:%")).all();
+      const plan = getPlanForDate(today);
+      return { sessions: sessions.length, prs: prs.length, planToday: !!plan, planCompletedToday: plan?.status === "completed" };
+    })(),
+    nutrition: (() => {
+      const t = resolveTargets(profile.preferences.nutrition, profile);
+      const c = nutritionConsistency(today, 30, t.protein, SAFE_MIN_CALORIES(profile.sex));
+      const todayT = dayTotals(today);
+      return { loggedDays30: c.loggedDays, proteinDays30: c.proteinDays, proteinToday: todayT.protein, proteinTarget: t.protein, caloriesToday: todayT.calories, calorieTarget: t.calories, unsafeTargets: t.unsafe };
+    })(),
   };
 }
 
@@ -363,6 +394,10 @@ export function reconcile(): ReconcileResult {
     if (a.xp > 0) awardXp("achievement", today, { suffix: a.key, amount: a.xp, description: `Achievement: ${a.name}` });
     recordEvent({ type: "achievement", key: `ach:${a.key}`, title: a.name, description: a.description + (a.title ? ` Title unlocked: “${a.title}”.` : ""), domain: a.domain === "system" || a.domain === "overall" ? null : a.domain });
     if (a.title && !profile.equippedTitle) updateProfile({ equippedTitle: a.title });
+    pushNotification(profile.preferences.notifications, { kind: "achievement", title: `Achievement unlocked: ${a.name}`, body: a.title ? `New title available: “${a.title}”` : a.description, href: "/profile#achievements", key: `n:ach:${a.key}` });
+  }
+  for (const q of completedQuests) {
+    if (q.kind !== "daily") pushNotification(profile.preferences.notifications, { kind: "quest", title: `Quest complete: ${q.title}`, body: `+${q.rewardXp} XP`, href: "/quests", key: `n:quest:${q.id}` });
   }
 
   // XP may have changed → recompute level/assessment
@@ -381,6 +416,8 @@ export function reconcile(): ReconcileResult {
       if (last && rankIndex(rank) > rankIndex(last.rank as Rank)) {
         rankUps.push({ domain, from: last.rank as Rank, to: rank });
         const name = domain === "overall" ? "Overall" : DOMAINS[domain].name;
+        pushNotification(profile.preferences.notifications, { kind: "rank", title: domain === "overall" ? `Rank up: ${RANK_VISUALS[rank].title}` : `${name} reached ${rank} rank`, body: domain === "overall" ? RANK_VISUALS[rank].quote : `Up from ${last.rank}.`, href: domain === "overall" ? "/profile" : `/domains/${domain}`, key: `n:rankup:${domain}:${rank}:${today}` });
+        if (domain === "overall") recordEvent({ type: "title", key: `title:${RANK_VISUALS[rank].title}`, title: `Title unlocked: “${RANK_VISUALS[rank].title}”`, description: `Reached ${rank} rank overall.`, domain: null });
         recordEvent({
           type: "rank_up",
           key: `rankup:${domain}:${rank}:${today}`,
@@ -413,6 +450,15 @@ export function reconcile(): ReconcileResult {
   if (levelAfter > levelBefore) {
     levelUp = { from: levelBefore, to: levelAfter };
     recordEvent({ type: "level_up", key: `level:${levelAfter}`, title: `Reached Level ${levelAfter}`, description: `${xpAfter.toLocaleString()} total XP.`, domain: null });
+    pushNotification(profile.preferences.notifications, { kind: "level", title: `Level ${levelAfter}`, body: `Up from level ${levelBefore}. ${levelFromXp(xpAfter).xpToNext} XP to the next.`, href: "/profile", key: `n:level:${levelAfter}` });
+  }
+  // Weekly review reminder (Mondays / Tuesdays) and sobriety milestone notifications
+  const wd = new Date(today + "T00:00:00Z").getUTCDay();
+  if ((wd === 1 || wd === 2) && profile.onboarded && diffDays(dateInTz(new Date(profile.onboardingCompletedAt ?? ""), profile.timezone), today) >= 7) {
+    pushNotification(profile.preferences.notifications, { kind: "review", title: "Your weekly review is ready", body: "What moved, what slipped, what to focus on.", href: "/progress/review", key: `n:review:${startOfWeek(today)}` });
+  }
+  for (const t of context.sobriety) {
+    if (t.lastMilestone && t.currentRunStart) pushNotification(profile.preferences.notifications, { kind: "sobriety", title: `${t.lastMilestone.label} on ${t.name}`, body: `Milestone reached. +${t.lastMilestone.xp} XP.`, href: "/domains/sobriety", key: `n:sob:${t.trackerId}:${t.currentRunStart.slice(0, 19)}:${t.lastMilestone.days}` });
   }
   // Ensure the first-ever level event exists for history continuity
   if (levelAfter >= 1 && !db.select().from(characterEvents).where(eq(characterEvents.key, "level:1")).get() && profile.onboarded) {
@@ -493,13 +539,6 @@ function ensureAndUpdateQuests(ctx: ProgressionContext, today: ISODate): Quest[]
   return completed;
 }
 
-export function recordEvent(e: { type: string; key: string; title: string; description: string; domain?: DomainId | null; occurredAt?: string }) {
-  getDb()
-    .insert(characterEvents)
-    .values({ type: e.type, key: e.key, title: e.title, description: e.description, domain: e.domain ?? null, occurredAt: e.occurredAt ?? new Date().toISOString() })
-    .onConflictDoNothing()
-    .run();
-}
 
 // ---------------------------------------------------------------------------
 // Reads used by pages

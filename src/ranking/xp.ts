@@ -27,6 +27,12 @@ export const XP_RULES = {
   sobriety_day: { amount: 5, dailyCap: 3, description: "Clean day" },
   sobriety_milestone: { amount: 0, dailyCap: 5, description: "Sobriety milestone" }, // amount comes from milestone table
   finance_snapshot: { amount: 20, dailyCap: 1, description: "Financial check-in" },
+  workout_session: { amount: 15, dailyCap: 1, description: "Bonus: completed a tracked session" },
+  personal_record: { amount: 0, dailyCap: 3, description: "Personal record" }, // amount from PR kind
+  protein_target: { amount: 15, dailyCap: 1, description: "Hit protein target" },
+  nutrition_logged: { amount: 5, dailyCap: 1, description: "Nutrition logged" },
+  planned_meal: { amount: 10, dailyCap: 3, description: "Ate a planned meal" },
+  quest_special: { amount: 0, dailyCap: 3, description: "Special quest" }, // amount from offer
   quest_daily: { amount: 0, dailyCap: 10, description: "Daily quest" },
   quest_weekly: { amount: 0, dailyCap: 10, description: "Weekly quest" },
   quest_long: { amount: 0, dailyCap: 10, description: "Boss quest" },
@@ -49,6 +55,9 @@ export const SOBRIETY_MILESTONES: { days: number; label: string; xp: number }[] 
   { days: 730, label: "2 years", xp: 1000 },
 ];
 
+/** XP for a personal record by kind. Never rewards a single-rep max attempt directly. */
+export const PR_XP: Record<string, number> = { weight: 50, e1rm: 75, reps: 35 };
+
 export function xpKey(rule: XpRuleKey, date: string, suffix?: string | number): string {
   return suffix === undefined ? `${rule}:${date}` : `${rule}:${date}:${suffix}`;
 }
@@ -67,6 +76,12 @@ export const DOMAIN_FOR_RULE: Record<XpRuleKey, DomainId | "quest" | "achievemen
   sobriety_day: "sobriety",
   sobriety_milestone: "sobriety",
   finance_snapshot: "wealth",
+  workout_session: "fitness",
+  personal_record: "fitness",
+  protein_target: "cooking",
+  nutrition_logged: "cooking",
+  planned_meal: "cooking",
+  quest_special: "quest",
   quest_daily: "quest",
   quest_weekly: "quest",
   quest_long: "quest",

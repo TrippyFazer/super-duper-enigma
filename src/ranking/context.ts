@@ -78,4 +78,7 @@ export interface ProgressionContext {
   };
   xp: { total: number; level: number };
   unlocked: Set<string>;
+  special: { completed: number; accepted: number; offeredToday: number };
+  training: { sessions: number; prs: number; planToday: boolean; planCompletedToday: boolean };
+  nutrition: { loggedDays30: number; proteinDays30: number; proteinToday: number; proteinTarget: number; caloriesToday: number; calorieTarget: number; unsafeTargets: boolean };
 }

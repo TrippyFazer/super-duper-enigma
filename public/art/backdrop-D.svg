@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 360" preserveAspectRatio="xMidYMax slice" width="800" height="360">
+<defs>
+  <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0c1322"/><stop offset="1" stop-color="#1d2d4f"/></linearGradient>
+  <linearGradient id="beam" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3f6cb0" stop-opacity=".9"/><stop offset="1" stop-color="#3f6cb0" stop-opacity="0"/></linearGradient>
+  <radialGradient id="sun" cx="0.8" cy="0.55" r="0.5"><stop offset="0" stop-color="#3f6cb0" stop-opacity=".55"/><stop offset="1" stop-color="#3f6cb0" stop-opacity="0"/></radialGradient>
+  <linearGradient id="fade" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0b0d12" stop-opacity="0"/><stop offset="1" stop-color="#0b0d12" stop-opacity="1"/></linearGradient>
+</defs>
+<rect width="800" height="360" fill="url(#sky)"/>
+
+<rect width="800" height="360" fill="url(#sun)"/>
+<ellipse cx="160" cy="110" rx="220" ry="34" fill="#1d2d4f" opacity=".5"/>
+
+<!-- far mountains -->
+<path d="M0 240 L120 160 L220 210 L330 130 L440 200 L520 170 L800 220 L800 360 L0 360 Z" fill="#0f1320" opacity=".9"/>
+<!-- castle -->
+<rect x="520" y="180" width="22" height="180" fill="#0b0d12"/><path d="M531 180 l0 -34" stroke="#0b0d12" stroke-width="2"/><path d="M532 146 l22 7 l-22 9 z" fill="#3f6cb0" opacity=".9"/><rect x="564" y="143" width="22" height="217" fill="#0b0d12"/><rect x="592" y="166" width="22" height="194" fill="#0b0d12"/><path d="M603 166 l0 -34" stroke="#0b0d12" stroke-width="2"/><path d="M604 132 l22 7 l-22 9 z" fill="#3f6cb0" opacity=".9"/>
+<rect x="500" y="250" width="148" height="110" fill="#0b0d12"/>
+<rect x="536" y="210" width="4" height="7" fill="#3f6cb0" opacity="0.7"/><rect x="572" y="228" width="4" height="7" fill="#3f6cb0" opacity="0.7"/><rect x="608" y="246" width="4" height="7" fill="#3f6cb0" opacity="0.7"/><rect x="536" y="210" width="4" height="7" fill="#3f6cb0" opacity="0.7"/><rect x="572" y="228" width="4" height="7" fill="#3f6cb0" opacity="0.7"/><rect x="608" y="246" width="4" height="7" fill="#3f6cb0" opacity="0.7"/><rect x="536" y="210" width="4" height="7" fill="#3f6cb0" opacity="0.7"/><rect x="572" y="228" width="4" height="7" fill="#3f6cb0" opacity="0.7"/><rect x="608" y="246" width="4" height="7" fill="#3f6cb0" opacity="0.7"/>
+<!-- bridge -->
+<path d="M0 290 L520 280 L520 300 L0 310 Z" fill="#0b0d12" opacity=".95"/>
+<path d="M60 310 a30 30 0 0 1 60 0 M180 308 a30 30 0 0 1 60 0 M300 305 a30 30 0 0 1 60 0" fill="none" stroke="#0b0d12" stroke-width="18"/>
+<rect x="0" y="270" width="800" height="90" fill="url(#fade)"/>
+</svg>

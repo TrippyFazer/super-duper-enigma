@@ -4,6 +4,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { AnimatePresence, motion } from "motion/react";
 import { Sparkles, Trophy, ArrowUpRight, Zap } from "lucide-react";
 import type { ActionFeedback } from "@/actions";
+import { RANK_VISUALS } from "@/ranking/rankVisuals";
+import type { Rank } from "@/ranking/types";
 
 interface Toast {
   id: number;
@@ -14,10 +16,13 @@ interface Toast {
 
 interface Celebration {
   id: number;
-  kind: "level" | "rank" | "achievement";
+  kind: "level" | "rank" | "achievement" | "pr";
   title: string;
   body: string;
   accent: "gold" | "accent" | "violet";
+  rank?: Rank;
+  from?: string | null;
+  eyebrow?: string;
 }
 
 interface FeedbackApi {
@@ -55,9 +60,16 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
       const cs: Celebration[] = [];
       if (f.levelUp) cs.push({ id: idRef.current++, kind: "level", title: `Level ${f.levelUp.to}`, body: `Up from level ${f.levelUp.from}. Keep climbing.`, accent: "accent" });
       for (const r of f.rankUps) {
-        const name = r.domain === "overall" ? "Overall rank" : r.domain[0].toUpperCase() + r.domain.slice(1);
-        cs.push({ id: idRef.current++, kind: "rank", title: `${name}: ${r.to}`, body: r.from ? `Promoted from ${r.from} rank.` : `Your first ${r.to} rank.`, accent: r.to === "S" ? "gold" : "violet" });
+        if (r.domain === "overall") {
+          const v = RANK_VISUALS[r.to as Rank];
+          cs.push({ id: idRef.current++, kind: "rank", title: v.title, body: `“${v.quote}”`, accent: r.to === "S" || r.to === "A" ? "gold" : "violet", rank: r.to as Rank, from: r.from, eyebrow: `Rank up · ${r.from ?? "E"} → ${r.to}` });
+        } else {
+          const name = r.domain[0].toUpperCase() + r.domain.slice(1);
+          cs.push({ id: idRef.current++, kind: "rank", title: `${name}: ${r.to}`, body: r.from ? `Promoted from ${r.from} rank.` : `Your first ${r.to} rank.`, accent: r.to === "S" ? "gold" : "violet" });
+        }
       }
+      const prs = (f as ActionFeedback & { prs?: { exerciseName: string; weight: number | null; reps: number | null; kind: string; value: number; xp: number }[] }).prs ?? [];
+      for (const pr of prs.filter((x) => x.kind === "weight")) cs.push({ id: idRef.current++, kind: "pr", title: pr.exerciseName, body: `${pr.weight} × ${pr.reps}${pr.xp ? ` · +${pr.xp} XP` : ""}`, accent: "gold", eyebrow: "New personal record" });
       for (const a of f.achievements) cs.push({ id: idRef.current++, kind: "achievement", title: a.name, body: a.title ? `Achievement unlocked · Title: “${a.title}”` : "Achievement unlocked", accent: "gold" });
       if (cs.length) setQueue((q) => [...q, ...cs]);
     },
@@ -121,6 +133,11 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
                 current.accent === "gold" ? "border-gold/50 rank-glow-s" : current.accent === "violet" ? "border-violet/50 shadow-[0_0_40px_-10px_rgba(176,140,245,0.6)]" : "border-accent/50 shadow-[var(--shadow-glow-accent)]"
               }`}
             >
+              {current.rank && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={RANK_VISUALS[current.rank].crest} alt="" className="mx-auto -mt-2 mb-2 h-40 w-auto drop-shadow-[0_12px_30px_rgba(0,0,0,0.7)]" />
+              )}
+              {!current.rank && (
               <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-black/40">
                 {current.kind === "level" ? (
                   <ArrowUpRight size={30} className="text-accent-2" />
@@ -130,7 +147,8 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
                   <Trophy size={30} className="text-gold" />
                 )}
               </div>
-              <div className="eyebrow">{current.kind === "level" ? "Level up" : current.kind === "rank" ? "Rank up" : "Achievement"}</div>
+              )}
+              <div className="eyebrow">{current.eyebrow ?? (current.kind === "level" ? "Level up" : current.kind === "rank" ? "Rank up" : current.kind === "pr" ? "Personal record" : "Achievement")}</div>
               <div className={`display mt-1 text-3xl font-semibold ${current.accent === "gold" ? "text-gradient-gold" : ""}`}>{current.title}</div>
               <p className="mt-2 text-sm text-text-2">{current.body}</p>
               <p className="mt-5 text-[11px] text-faint">Tap to continue</p>

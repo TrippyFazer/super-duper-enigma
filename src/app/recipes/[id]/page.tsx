@@ -41,7 +41,7 @@ export default async function RecipePage({ params }: { params: Promise<{ id: str
         ))}
       </div>
 
-      <RecipeActions id={recipe.id} name={recipe.name} isFavorite={recipe.isFavorite} isSaved={recipe.isSaved} today={profile.today} timesCooked={cooked.length} />
+      <RecipeActions id={recipe.id} name={recipe.name} isFavorite={recipe.isFavorite} isSaved={recipe.isSaved} today={profile.today} timesCooked={cooked.length} hasNutrition={recipe.calories != null} mealType={recipe.mealType} />
 
       <Card>
         <div className="eyebrow mb-2">Ingredients</div>

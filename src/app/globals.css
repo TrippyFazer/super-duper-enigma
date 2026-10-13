@@ -31,7 +31,8 @@
   --color-rank-s: #e8c46a;
 
   --font-sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Inter, Roboto, "Helvetica Neue", Arial, sans-serif;
-  --font-display: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, Georgia, "Times New Roman", serif;
+  --font-display: var(--font-cinzel), "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  --font-serif: var(--font-cormorant), "Iowan Old Style", "Palatino Linotype", Georgia, serif;
   --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
 
   --radius-xl: 1.125rem;
@@ -233,4 +234,42 @@ textarea {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* ---- Knight-era plates: chamfered cards with a hairline gold frame ------- */
+@utility plate {
+  position: relative;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(0, 0, 0, 0)) padding-box,
+    linear-gradient(180deg, rgba(212, 175, 90, 0.45), rgba(212, 175, 90, 0.12) 40%, rgba(36, 42, 58, 0.9)) border-box;
+  background-color: var(--color-card);
+  border: 1px solid transparent;
+  clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
+  border-radius: 6px;
+}
+
+@utility plate-dark {
+  background-color: rgba(11, 13, 18, 0.72);
+}
+
+@utility plate-tile {
+  background: linear-gradient(160deg, #1f2638, #121724);
+  border: 1px solid rgba(212, 175, 90, 0.25);
+  clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
+}
+
+@utility serif {
+  font-family: var(--font-serif);
+}
+
+@utility gold-rule {
+  background: linear-gradient(90deg, transparent, rgba(212, 175, 90, 0.7), transparent);
+  height: 1px;
+}
+
+@utility ring-circle {
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 9999px;
+  border: 1.5px solid rgba(236, 233, 225, 0.35);
 }

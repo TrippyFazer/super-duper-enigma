@@ -15,7 +15,21 @@ const HABIT_SUGGESTIONS = ["Read 20 minutes", "Meditate", "Journal", "Stretch", 
 const AM_STEPS = ["Cleanser", "Moisturizer", "SPF"];
 const PM_STEPS = ["Cleanser", "Treatment", "Moisturizer"];
 
-type Step = "name" | "domains" | "fitness" | "sleep" | "cooking" | "skincare" | "sobriety" | "habits" | "wealth" | "done";
+type Step = "name" | "domains" | "fitness" | "training" | "sleep" | "cooking" | "nutrition" | "skincare" | "sobriety" | "habits" | "wealth" | "quests" | "done";
+
+const EQUIPMENT = [
+  ["barbell", "Barbell"],
+  ["dumbbell", "Dumbbells"],
+  ["cable", "Cables"],
+  ["machine", "Machines"],
+  ["kettlebell", "Kettlebell"],
+  ["band", "Bands"],
+  ["bodyweight", "Bodyweight"],
+  ["cardio-machine", "Cardio machine"],
+] as const;
+type Equip = (typeof EQUIPMENT)[number][0];
+const DIETS = ["vegetarian", "pescatarian", "dairy-free", "gluten-free", "low-carb", "halal", "kosher"];
+const DISLIKE_SUGGESTIONS = ["mushrooms", "cilantro", "fish", "tofu", "olives", "spicy food", "eggs", "dairy"];
 
 export function OnboardingWizard() {
   const router = useRouter();
@@ -43,8 +57,32 @@ export function OnboardingWizard() {
   const [habits, setHabits] = useState<string[]>(["Read 20 minutes", "Meditate"]);
   const [customHabit, setCustomHabit] = useState("");
   const [goals, setGoals] = useState("");
+  const [heightCm, setHeightCm] = useState("");
+  const [weightKg, setWeightKg] = useState("");
+  const [fitGoal, setFitGoal] = useState<"general" | "strength" | "muscle" | "fat-loss" | "conditioning" | "athleticism" | "hybrid">("general");
+  const [experience, setExperience] = useState<"beginner" | "intermediate" | "advanced">("beginner");
+  const [daysPerWeek, setDaysPerWeek] = useState("3");
+  const [equipment, setEquipment] = useState<Equip[]>(["dumbbell", "bodyweight"]);
+  const [lengthMin, setLengthMin] = useState("45");
+  const [nutGoal, setNutGoal] = useState<"maintain" | "lose" | "gain" | "recomp">("maintain");
+  const [calories, setCalories] = useState("");
+  const [protein, setProtein] = useState("");
+  const [diets, setDiets] = useState<string[]>([]);
+  const [dislikes, setDislikes] = useState<string[]>([]);
+  const [customDislike, setCustomDislike] = useState("");
+  const [questFreq, setQuestFreq] = useState<"low" | "normal" | "high">("normal");
 
-  const order: Step[] = ["name", "domains", ...(["fitness", "sleep", "cooking", "skincare", "sobriety", "habits", "wealth"] as Step[]).filter((s) => domains.includes(s as DomainId)), "done"];
+  const order: Step[] = [
+    "name",
+    "domains",
+    ...(["fitness", "training", "sleep", "cooking", "nutrition", "skincare", "sobriety", "habits", "wealth"] as Step[]).filter((s) => {
+      if (s === "training") return domains.includes("fitness");
+      if (s === "nutrition") return domains.includes("cooking") || domains.includes("fitness");
+      return domains.includes(s as DomainId);
+    }),
+    "quests",
+    "done",
+  ];
   const [idx, setIdx] = useState(0);
   const step = order[Math.min(idx, order.length - 1)];
   const progress = (idx + 1) / order.length;
@@ -65,6 +103,8 @@ export function OnboardingWizard() {
         name: name.trim(),
         age: age ? Number(age) : null,
         sex: sex || null,
+        heightCm: heightCm ? Number(heightCm) : null,
+        weightKg: weightKg ? Number(weightKg) : null,
         timezone: tz,
         activeDomains: domains,
         baseline: {
@@ -85,6 +125,11 @@ export function OnboardingWizard() {
         routines: domains.includes("skincare") ? { morning: am, evening: pm } : undefined,
         sobriety: domains.includes("sobriety") ? trackers : undefined,
         habits: domains.includes("habits") ? habits : undefined,
+        preferences: {
+          fitness: domains.includes("fitness") ? { goal: fitGoal, experience, daysPerWeek: Number(daysPerWeek), equipment: equipment.length ? equipment : ["bodyweight"], workoutLengthMin: Number(lengthMin) } : undefined,
+          nutrition: { goal: nutGoal, calorieTarget: calories ? Number(calories) : null, proteinTarget: protein ? Number(protein) : null, dietPrefs: diets, dislikes },
+          questFrequency: questFreq,
+        },
       };
       const r = await completeOnboardingAction(input);
       if (!r.ok) {
@@ -135,6 +180,14 @@ export function OnboardingWizard() {
                     <option value="female">Female</option>
                     <option value="other">Other</option>
                   </select>
+                </Field>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Height cm (optional)" hint="For calorie estimates">
+                  <input type="number" inputMode="numeric" value={heightCm} onChange={(e) => setHeightCm(e.target.value)} placeholder="178" className={inputClass} />
+                </Field>
+                <Field label="Weight kg (optional)">
+                  <input type="number" inputMode="decimal" value={weightKg} onChange={(e) => setWeightKg(e.target.value)} placeholder="76" className={inputClass} />
                 </Field>
               </div>
               <p className="text-xs text-muted">Timezone detected: {tz}</p>
@@ -199,6 +252,70 @@ export function OnboardingWizard() {
           </>
         )}
 
+        {step === "training" && (
+          <>
+            <Title eyebrow="Training" title="How do you want to train?" body="This shapes your generated workouts. Everything can be changed later in Settings." />
+            <div className="space-y-5">
+              <Field label="Main goal" group>
+                <div className="grid grid-cols-2 gap-2">
+                  {(
+                    [
+                      ["general", "General fitness"],
+                      ["strength", "Get stronger"],
+                      ["muscle", "Build muscle"],
+                      ["fat-loss", "Lose fat"],
+                      ["conditioning", "Conditioning"],
+                      ["athleticism", "Athleticism"],
+                    ] as const
+                  ).map(([v, l]) => (
+                    <button key={v} type="button" onClick={() => setFitGoal(v)} className={cx("press rounded-lg border px-3 py-2.5 text-left text-sm", fitGoal === v ? "border-gold/60 bg-gold/12 text-gold" : "border-border bg-card-2 text-text-2")}>
+                      {l}
+                    </button>
+                  ))}
+                </div>
+              </Field>
+              <Field label="Experience" group>
+                <Segmented
+                  value={experience}
+                  onChange={setExperience}
+                  options={[
+                    { value: "beginner", label: "Beginner" },
+                    { value: "intermediate", label: "Intermediate" },
+                    { value: "advanced", label: "Advanced" },
+                  ]}
+                />
+              </Field>
+              <Field label="Training days per week" group>
+                <div className="flex gap-2">
+                  {["2", "3", "4", "5", "6"].map((n) => (
+                    <button key={n} type="button" onClick={() => setDaysPerWeek(n)} className={cx("press flex-1 rounded-lg border py-2.5 text-sm tabular", daysPerWeek === n ? "border-gold/60 bg-gold/12 text-gold" : "border-border bg-card-2 text-text-2")}>
+                      {n}
+                    </button>
+                  ))}
+                </div>
+              </Field>
+              <Field label="Session length" group>
+                <div className="flex gap-2">
+                  {["30", "45", "60", "75"].map((n) => (
+                    <button key={n} type="button" onClick={() => setLengthMin(n)} className={cx("press flex-1 rounded-lg border py-2.5 text-sm tabular", lengthMin === n ? "border-gold/60 bg-gold/12 text-gold" : "border-border bg-card-2 text-text-2")}>
+                      {n} min
+                    </button>
+                  ))}
+                </div>
+              </Field>
+              <Field label="Equipment you have" group>
+                <div className="flex flex-wrap gap-2">
+                  {EQUIPMENT.map(([v, l]) => (
+                    <Chip key={v} active={equipment.includes(v)} onClick={() => setEquipment((xs) => (xs.includes(v) ? xs.filter((x) => x !== v) : [...xs, v]))}>
+                      {l}
+                    </Chip>
+                  ))}
+                </div>
+              </Field>
+            </div>
+          </>
+        )}
+
         {step === "sleep" && (
           <>
             <Title eyebrow="Sleep" title="How do you sleep?" body="Connect your Oura Ring in settings after setup — it replaces manual logging entirely." />
@@ -242,6 +359,66 @@ export function OnboardingWizard() {
                 ))}
               </div>
             </Field>
+          </>
+        )}
+
+        {step === "nutrition" && (
+          <>
+            <Title eyebrow="Nutrition" title="Fuel, not punishment" body="Targets drive meal plans and protein XP. Leave calories blank to use an estimate from your profile. Eating less is never rewarded." />
+            <div className="space-y-5">
+              <Field label="Goal" group>
+                <Segmented
+                  value={nutGoal}
+                  onChange={setNutGoal}
+                  options={[
+                    { value: "maintain", label: "Maintain" },
+                    { value: "lose", label: "Lose fat" },
+                    { value: "gain", label: "Gain" },
+                    { value: "recomp", label: "Recomp" },
+                  ]}
+                />
+              </Field>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Calories / day (optional)">
+                  <input type="number" inputMode="numeric" value={calories} onChange={(e) => setCalories(e.target.value)} placeholder="Estimate" className={inputClass} />
+                </Field>
+                <Field label="Protein g / day (optional)">
+                  <input type="number" inputMode="numeric" value={protein} onChange={(e) => setProtein(e.target.value)} placeholder="Estimate" className={inputClass} />
+                </Field>
+              </div>
+              <Field label="Diet" group>
+                <div className="flex flex-wrap gap-2">
+                  {DIETS.map((d) => (
+                    <Chip key={d} active={diets.includes(d)} onClick={() => toggleIn(diets, setDiets, d)}>
+                      {d}
+                    </Chip>
+                  ))}
+                </div>
+              </Field>
+              <Field label="Foods you dislike" group>
+                <div className="flex flex-wrap gap-2">
+                  {Array.from(new Set([...DISLIKE_SUGGESTIONS, ...dislikes])).map((d) => (
+                    <Chip key={d} active={dislikes.includes(d)} onClick={() => toggleIn(dislikes, setDislikes, d)}>
+                      {d}
+                    </Chip>
+                  ))}
+                </div>
+                <div className="mt-2 flex gap-2">
+                  <input value={customDislike} onChange={(e) => setCustomDislike(e.target.value)} placeholder="Add a food" className={cx(inputClass, "py-2")} maxLength={40} />
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => {
+                      if (!customDislike.trim()) return;
+                      setDislikes((xs) => [...xs, customDislike.trim().toLowerCase()]);
+                      setCustomDislike("");
+                    }}
+                  >
+                    Add
+                  </Button>
+                </div>
+              </Field>
+            </div>
           </>
         )}
 
@@ -374,12 +551,37 @@ export function OnboardingWizard() {
           </>
         )}
 
+        {step === "quests" && (
+          <>
+            <Title eyebrow="Special quests" title="How often should the world call on you?" body="Optional quests appear a few times a week with bonus XP. Declining one never costs anything." />
+            <div className="space-y-2">
+              {(
+                [
+                  ["low", "Low", "A few per week. Quiet."],
+                  ["normal", "Normal", "About one most days, never more than two."],
+                  ["high", "High", "Up to two a day. For people who like side quests."],
+                ] as const
+              ).map(([v, l, d]) => (
+                <button key={v} type="button" onClick={() => setQuestFreq(v)} className={cx("press flex w-full items-center gap-3 rounded-xl border px-4 py-3 text-left", questFreq === v ? "border-gold/50 bg-gold/10" : "border-border bg-card")}>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-medium">{l}</div>
+                    <div className="text-xs text-muted">{d}</div>
+                  </div>
+                  <span className={cx("flex h-6 w-6 items-center justify-center rounded-full border", questFreq === v ? "border-gold bg-gold text-[#1a1406]" : "border-border-strong")}>{questFreq === v && <Check size={14} strokeWidth={3} />}</span>
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+
         {step === "done" && (
           <>
             <Title eyebrow="Ready" title={`Welcome, ${name.trim() || "Adventurer"}.`} body="You start at the bottom. Everyone does. Ranks above D are proven over weeks, not claimed — log honestly and the climb takes care of itself." />
             <div className="card space-y-2 p-4 text-sm text-text-2">
               <Row k="Domains" v={domains.map((d) => DOMAINS[d].name).join(", ")} />
-              {domains.includes("fitness") && <Row k="Training" v={`${workouts}×/week · ${types.join(", ") || "—"}`} />}
+              {domains.includes("fitness") && <Row k="Training" v={`${workouts}×/week now → ${daysPerWeek}×/week · ${fitGoal} · ${lengthMin} min`} />}
+              <Row k="Nutrition" v={`${nutGoal}${calories ? ` · ${calories} kcal` : ""}${protein ? ` · ${protein} g protein` : ""}${diets.length ? ` · ${diets.join(", ")}` : ""}`} />
+              <Row k="Quests" v={`${questFreq} frequency`} />
               {domains.includes("sleep") && <Row k="Sleep" v={`${sleepHours}h · bed by ${bedtime}`} />}
               {domains.includes("cooking") && <Row k="Cooking" v={`${meals} meals/week`} />}
               {domains.includes("skincare") && <Row k="Routines" v={`AM ${am.length} steps · PM ${pm.length} steps`} />}

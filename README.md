@@ -50,6 +50,12 @@ Copy `.env.example` to `.env.local`. Everything is optional.
 | `APP_URL` | Public URL of the app, used to build the Oura OAuth redirect (`<APP_URL>/api/oura/callback`) |
 | `OURA_CLIENT_ID`, `OURA_CLIENT_SECRET` | Oura OAuth2 application credentials (recommended path; see `docs/oura-integration.md`) |
 | `OURA_PERSONAL_ACCESS_TOKEN` | A legacy Oura personal token, if you still have one |
+| `AI_PROVIDER` | `openai` (any OpenAI-compatible chat API) or `anthropic`. Optional. |
+| `AI_API_KEY` | API key for that provider. Optional; can also be entered in Settings → AI provider (stored only in your local database). |
+| `AI_MODEL` | Model id (defaults: `gpt-4o-mini` / `claude-haiku-5-5`) |
+| `AI_BASE_URL` | Override the API base URL, e.g. a local Ollama or Groq endpoint |
+
+**The whole app works without an AI key.** Workouts, meal plans, special quests and the coach fall back to deterministic templates, the recipe catalog and a rule-based coach. With a key, results are cached per day in `ai_cache` so the home screen never makes a model call; only explicit "generate / regenerate / ask" actions do.
 
 Never commit `.env.local`.
 
@@ -57,13 +63,16 @@ Never commit `.env.local`.
 
 ```
 src/
-  app/            Next.js App Router pages: home, onboarding, quests, progress, recipes, profile, domains/[domain], API routes
+  app/            Next.js App Router pages: home, onboarding, quests, progress, planner (workout, session, meals, history), coach, notifications, recipes, profile, domains/[domain], API routes
   actions/        Server actions (Zod-validated) — the only write path from the UI
-  services/       Data access + the progression service (reconcile: quests, achievements, XP, rank history)
-  ranking/        Pure ranking engine: scale, ranks, gating, levels, XP rules, quests, achievements, domains/*
-  db/             Drizzle schema, migrations, SQLite client, recipe seed
+  services/       Data access + progression (reconcile), quest offers, workouts/sessions/PRs, nutrition, planner, notifications, preferences
+  ranking/        Pure ranking engine: scale, ranks, gating, levels, XP rules, quests, quest library + safety guardrails, achievements, rank visuals, domains/*
+  planner/        Exercise catalog, template workout generator (rotation + muscle fatigue + readiness), template meal planner
+  ai/             Provider abstraction (OpenAI-compatible / Anthropic), Zod output contracts, context builder, generation + cache
+  db/             Drizzle schema, migrations, SQLite client, recipe + nutrition seed
   integrations/   Oura API v2 client + sync
-  components/     UI (mobile-first, dark RPG aesthetic)
+  components/     UI (mobile-first, knight/RPG aesthetic; hero, quests, planner, session tracker, nutrition, coach)
+public/art/       Procedurally generated crest + backdrop art per rank (E Novice Squire → S Legendary Paladin)
 docs/
   ranking-research.md     Sources and population statistics behind every threshold
   ranking-methodology.md  How scores, ranks, gating, XP and levels are computed
@@ -94,6 +103,6 @@ Everything lives in `data/ascend.db` on the machine running the app. Financial f
 ## Testing
 
 ```bash
-npm test          # 49 tests: anchors, rank mapping, gating, levels, each domain scorer, XP ledger, quests, achievements
+npm test          # 82 tests: engine, XP ledger, quests, achievements, quest offers (no-penalty decline, expiry, XP bands, guardrails), AI contracts + fallback + cache, workout sessions/PRs, nutrition + meal plans
 npm run typecheck
 ```

@@ -4,6 +4,7 @@ import { profiles, type Profile } from "@/db/schema";
 import { parseJson, toJson } from "@/lib/json";
 import { todayInTz, timeInTz, type ISODate } from "@/lib/dates";
 import { DOMAIN_IDS, type DomainId } from "@/ranking/types";
+import { mergePreferences, type Preferences } from "./preferences";
 
 export interface Targets {
   stepsTarget: number;
@@ -31,10 +32,11 @@ export const DEFAULT_TARGETS: Targets = {
   mealsPerWeekTarget: 7,
 };
 
-export interface ProfileView extends Omit<Profile, "activeDomains" | "targets" | "baseline"> {
+export interface ProfileView extends Omit<Profile, "activeDomains" | "targets" | "baseline" | "preferences"> {
   activeDomains: DomainId[];
   targets: Targets;
   baseline: Baseline;
+  preferences: Preferences;
   today: ISODate;
   localTime: string;
   onboarded: boolean;
@@ -61,6 +63,7 @@ export function toView(row: Profile): ProfileView {
     activeDomains: active,
     targets: { ...DEFAULT_TARGETS, ...parseJson<Partial<Targets>>(row.targets, {}) },
     baseline: parseJson<Baseline>(row.baseline, {}),
+    preferences: mergePreferences(parseJson<Partial<Preferences>>(row.preferences, {})),
     today: todayInTz(timezone),
     localTime: timeInTz(timezone),
     onboarded: !!row.onboardingCompletedAt,
@@ -78,6 +81,7 @@ export interface ProfileUpdate {
   activeDomains?: DomainId[];
   targets?: Partial<Targets>;
   baseline?: Partial<Baseline>;
+  preferences?: Partial<Preferences>;
   goals?: string | null;
   onboardingCompletedAt?: string | null;
 }
@@ -100,6 +104,17 @@ export function updateProfile(patch: ProfileUpdate): ProfileView {
   if (patch.activeDomains !== undefined) values.activeDomains = toJson(patch.activeDomains);
   if (patch.targets !== undefined) values.targets = toJson({ ...current.targets, ...patch.targets });
   if (patch.baseline !== undefined) values.baseline = toJson({ ...current.baseline, ...patch.baseline });
+  if (patch.preferences !== undefined) {
+    const merged = mergePreferences({
+      ...current.preferences,
+      ...patch.preferences,
+      fitness: { ...current.preferences.fitness, ...(patch.preferences.fitness ?? {}) },
+      nutrition: { ...current.preferences.nutrition, ...(patch.preferences.nutrition ?? {}) },
+      notifications: { ...current.preferences.notifications, ...(patch.preferences.notifications ?? {}) },
+      ai: { ...current.preferences.ai, ...(patch.preferences.ai ?? {}) },
+    });
+    values.preferences = toJson(merged);
+  }
   db.update(profiles).set(values).where(eq(profiles.id, current.id)).run();
   return getProfile();
 }

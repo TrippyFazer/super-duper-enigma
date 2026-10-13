@@ -31,6 +31,8 @@ export const profiles = sqliteTable("profiles", {
   /** Onboarding baseline answers, JSON (kept for explanation + seeding substats) */
   baseline: text("baseline").notNull().default("{}"),
   goals: text("goals"),
+  /** Preferences JSON: fitness goal/equipment, nutrition targets, quest frequency, notification toggles, AI settings */
+  preferences: text("preferences").notNull().default("{}"),
   onboardingCompletedAt: text("onboarding_completed_at"),
   createdAt: text("created_at").notNull().default(now),
   updatedAt: text("updated_at").notNull().default(now),
@@ -121,6 +123,8 @@ export const recipes = sqliteTable("recipes", {
   servings: integer("servings").notNull().default(2),
   proteinG: integer("protein_g"),
   calories: integer("calories"),
+  carbsG: integer("carbs_g"),
+  fatG: integer("fat_g"),
   isFavorite: integer("is_favorite", { mode: "boolean" }).notNull().default(false),
   isSaved: integer("is_saved", { mode: "boolean" }).notNull().default(false),
   source: text("source").notNull().default("builtin"), // builtin | custom
@@ -391,3 +395,220 @@ export type Quest = typeof quests.$inferSelect;
 export type UserAchievement = typeof userAchievements.$inferSelect;
 export type CharacterEvent = typeof characterEvents.$inferSelect;
 export type Integration = typeof integrations.$inferSelect;
+
+// ---------------------------------------------------------------------------
+// Special (optional) quest offers — library or AI generated, never punitive
+// ---------------------------------------------------------------------------
+export const questOffers = sqliteTable(
+  "quest_offers",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    /** Library template key, or null for AI-generated */
+    templateKey: text("template_key"),
+    source: text("source").notNull().default("library"), // library | ai
+    title: text("title").notNull(),
+    description: text("description").notNull().default(""),
+    domain: text("domain").notNull(),
+    /** common | uncommon | rare | epic | legendary */
+    difficulty: text("difficulty").notNull().default("common"),
+    /** special | side | recovery | social | discipline | bonus */
+    kind: text("kind").notNull().default("special"),
+    estimatedMinutes: integer("estimated_minutes").notNull().default(20),
+    xpReward: integer("xp_reward").notNull().default(30),
+    /** offered | accepted | completed | declined | expired */
+    status: text("status").notNull().default("offered"),
+    date: text("date").notNull(),
+    offeredAt: text("offered_at").notNull().default(now),
+    acceptedAt: text("accepted_at"),
+    completedAt: text("completed_at"),
+    declinedAt: text("declined_at"),
+    expiresAt: text("expires_at"),
+    params: text("params").notNull().default("{}"),
+  },
+  (t) => [index("quest_offers_date_idx").on(t.date), index("quest_offers_status_idx").on(t.status)],
+);
+
+// ---------------------------------------------------------------------------
+// Workout planning & tracking
+// ---------------------------------------------------------------------------
+export const workoutPlans = sqliteTable(
+  "workout_plans",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    date: text("date").notNull(),
+    name: text("name").notNull(),
+    focus: text("focus").notNull().default("full"),
+    goal: text("goal").notNull().default("general"),
+    estimatedMinutes: integer("estimated_minutes").notNull().default(45),
+    source: text("source").notNull().default("template"), // template | ai
+    /** JSON PlanExercise[] */
+    exercises: text("exercises").notNull().default("[]"),
+    /** Optional bonus quest attached to the plan, JSON */
+    bonus: text("bonus"),
+    notes: text("notes"),
+    /** planned | started | completed | skipped */
+    status: text("status").notNull().default("planned"),
+    createdAt: text("created_at").notNull().default(now),
+  },
+  (t) => [index("workout_plans_date_idx").on(t.date)],
+);
+
+export const workoutSessions = sqliteTable(
+  "workout_sessions",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    planId: integer("plan_id").references(() => workoutPlans.id, { onDelete: "set null" }),
+    date: text("date").notNull(),
+    name: text("name").notNull(),
+    focus: text("focus").notNull().default("full"),
+    startedAt: text("started_at").notNull().default(now),
+    finishedAt: text("finished_at"),
+    durationMin: integer("duration_min"),
+    /** active | completed | abandoned */
+    status: text("status").notNull().default("active"),
+    notes: text("notes"),
+    /** The fitness log row created when the session finishes */
+    workoutId: integer("workout_id").references(() => workouts.id, { onDelete: "set null" }),
+  },
+  (t) => [index("workout_sessions_date_idx").on(t.date)],
+);
+
+export const sessionExercises = sqliteTable(
+  "session_exercises",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    sessionId: integer("session_id")
+      .notNull()
+      .references(() => workoutSessions.id, { onDelete: "cascade" }),
+    slug: text("slug").notNull(),
+    name: text("name").notNull(),
+    orderIndex: integer("order_index").notNull().default(0),
+    targetSets: integer("target_sets").notNull().default(3),
+    targetReps: text("target_reps").notNull().default("8-12"),
+    restSeconds: integer("rest_seconds").notNull().default(90),
+    notes: text("notes"),
+    /** pending | done | skipped */
+    status: text("status").notNull().default("pending"),
+  },
+  (t) => [index("session_exercises_session_idx").on(t.sessionId)],
+);
+
+export const exerciseSets = sqliteTable(
+  "exercise_sets",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    sessionExerciseId: integer("session_exercise_id")
+      .notNull()
+      .references(() => sessionExercises.id, { onDelete: "cascade" }),
+    setIndex: integer("set_index").notNull(),
+    weight: real("weight"),
+    reps: integer("reps"),
+    durationSec: integer("duration_sec"),
+    completed: integer("completed", { mode: "boolean" }).notNull().default(false),
+    completedAt: text("completed_at"),
+  },
+  (t) => [uniqueIndex("exercise_sets_uq").on(t.sessionExerciseId, t.setIndex)],
+);
+
+export const personalRecords = sqliteTable(
+  "personal_records",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    exerciseSlug: text("exercise_slug").notNull(),
+    exerciseName: text("exercise_name").notNull(),
+    /** weight | e1rm | reps */
+    kind: text("kind").notNull(),
+    value: real("value").notNull(),
+    weight: real("weight"),
+    reps: integer("reps"),
+    date: text("date").notNull(),
+    sessionId: integer("session_id").references(() => workoutSessions.id, { onDelete: "set null" }),
+    createdAt: text("created_at").notNull().default(now),
+  },
+  (t) => [uniqueIndex("personal_records_uq").on(t.exerciseSlug, t.kind)],
+);
+
+// ---------------------------------------------------------------------------
+// Nutrition
+// ---------------------------------------------------------------------------
+export const mealPlans = sqliteTable(
+  "meal_plans",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    date: text("date").notNull(),
+    source: text("source").notNull().default("template"), // template | ai
+    calorieTarget: integer("calorie_target").notNull(),
+    proteinTarget: integer("protein_target").notNull(),
+    /** JSON PlannedMeal[] */
+    meals: text("meals").notNull().default("[]"),
+    createdAt: text("created_at").notNull().default(now),
+  },
+  (t) => [uniqueIndex("meal_plans_date_uq").on(t.date)],
+);
+
+export const nutritionEntries = sqliteTable(
+  "nutrition_entries",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    date: text("date").notNull(),
+    mealType: text("meal_type").notNull().default("snack"),
+    name: text("name").notNull(),
+    calories: integer("calories").notNull().default(0),
+    protein: integer("protein").notNull().default(0),
+    carbs: integer("carbs").notNull().default(0),
+    fat: integer("fat").notNull().default(0),
+    fiber: integer("fiber"),
+    /** manual | quick | plan | recipe | ai */
+    source: text("source").notNull().default("manual"),
+    recipeId: integer("recipe_id").references(() => recipes.id, { onDelete: "set null" }),
+    planMealIndex: integer("plan_meal_index"),
+    /** Linked cooked-meal row when the food was home-cooked */
+    mealId: integer("meal_id").references(() => meals.id, { onDelete: "set null" }),
+    createdAt: text("created_at").notNull().default(now),
+  },
+  (t) => [index("nutrition_entries_date_idx").on(t.date)],
+);
+
+// ---------------------------------------------------------------------------
+// AI cache + notifications
+// ---------------------------------------------------------------------------
+export const aiCache = sqliteTable(
+  "ai_cache",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    kind: text("kind").notNull(), // workout | meals | quest | coach | review
+    cacheKey: text("cache_key").notNull(),
+    date: text("date").notNull(),
+    response: text("response").notNull(),
+    provider: text("provider"),
+    model: text("model"),
+    createdAt: text("created_at").notNull().default(now),
+  },
+  (t) => [uniqueIndex("ai_cache_key_uq").on(t.cacheKey)],
+);
+
+export const notifications = sqliteTable(
+  "notifications",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    /** quest | workout | meals | level | rank | achievement | sobriety | review | system */
+    kind: text("kind").notNull(),
+    title: text("title").notNull(),
+    body: text("body").notNull().default(""),
+    href: text("href"),
+    key: text("key"),
+    createdAt: text("created_at").notNull().default(now),
+    readAt: text("read_at"),
+  },
+  (t) => [uniqueIndex("notifications_key_uq").on(t.key)],
+);
+
+export type QuestOffer = typeof questOffers.$inferSelect;
+export type WorkoutPlan = typeof workoutPlans.$inferSelect;
+export type WorkoutSession = typeof workoutSessions.$inferSelect;
+export type SessionExercise = typeof sessionExercises.$inferSelect;
+export type ExerciseSet = typeof exerciseSets.$inferSelect;
+export type PersonalRecord = typeof personalRecords.$inferSelect;
+export type MealPlan = typeof mealPlans.$inferSelect;
+export type NutritionEntry = typeof nutritionEntries.$inferSelect;
+export type Notification = typeof notifications.$inferSelect;

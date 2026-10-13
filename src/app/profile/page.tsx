@@ -6,6 +6,7 @@ import { getCharacterEvents, getUnlockedAchievements, getUnlockedTitles, reconci
 import { ACHIEVEMENTS } from "@/ranking/achievements";
 import { DOMAINS } from "@/ranking/domains";
 import { RANK_LABELS } from "@/ranking/ranks";
+import { RANK_VISUALS } from "@/ranking/rankVisuals";
 import { Card, PageHeader, ProgressBar, SectionTitle, cx } from "@/components/ui/primitives";
 import { RankBadge, RANK_COLOR } from "@/components/ui/RankBadge";
 import { TitlePicker } from "@/components/profile/TitlePicker";
@@ -39,11 +40,16 @@ export default function ProfilePage() {
       <Card glow={overall.rank === "S" ? "gold" : null} className="relative overflow-hidden">
         <div className="pointer-events-none absolute -right-20 -top-20 h-56 w-56 rounded-full bg-accent/10 blur-3xl" />
         <div className="relative flex flex-col items-center text-center">
-          <RankBadge rank={overall.rank} size="xl" />
-          <div className="display mt-4 text-3xl font-semibold uppercase tracking-wide">{profile.name}</div>
-          <div className="mt-1 text-sm text-text-2">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={RANK_VISUALS[overall.rank].crest} alt="" width={132} height={132} className="drop-shadow-[0_8px_24px_rgba(0,0,0,0.6)]" />
+          <div className="display mt-3 text-3xl font-semibold uppercase tracking-wide text-gradient-gold">{profile.name}</div>
+          <div className="display mt-1 text-sm tracking-wide" style={{ color: RANK_VISUALS[overall.rank].accent }}>
+            {RANK_VISUALS[overall.rank].title}
+          </div>
+          <div className="mt-1 text-xs text-text-2">
             Level {level.level} · {overall.rank}-Rank {RANK_LABELS[overall.rank]}
           </div>
+          <p className="serif mt-2 max-w-[280px] text-[14px] italic text-muted">&ldquo;{RANK_VISUALS[overall.rank].quote}&rdquo;</p>
           <TitlePicker current={profile.equippedTitle} titles={titles} />
         </div>
         <div className="relative mt-5 grid grid-cols-2 gap-x-6 gap-y-2">

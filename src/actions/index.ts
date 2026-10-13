@@ -287,6 +287,13 @@ const onboardingSchema = z.object({
   routines: z.object({ morning: z.array(z.string()).optional(), evening: z.array(z.string()).optional() }).optional(),
   sobriety: z.array(z.object({ name: z.string().trim().min(1).max(60), category: z.enum(["alcohol", "cannabis", "nicotine", "custom"]), startedAt: z.string().min(10) })).optional(),
   habits: z.array(z.string().trim().min(1).max(60)).optional(),
+  preferences: z
+    .object({
+      fitness: z.object({ goal: z.enum(["general", "strength", "muscle", "fat-loss", "conditioning", "athleticism", "hybrid"]), experience: z.enum(["beginner", "intermediate", "advanced"]), daysPerWeek: z.coerce.number().int().min(1).max(7), equipment: z.array(z.enum(["barbell", "dumbbell", "cable", "machine", "bodyweight", "kettlebell", "band", "cardio-machine"])), workoutLengthMin: z.coerce.number().int().min(15).max(120), injuries: z.string().max(300).optional(), preferences: z.string().max(300).optional() }).partial().optional(),
+      nutrition: z.object({ goal: z.enum(["maintain", "lose", "gain", "recomp"]), calorieTarget: z.coerce.number().int().min(800).max(6000).nullable(), proteinTarget: z.coerce.number().int().min(20).max(400).nullable(), dietPrefs: z.array(z.string().max(30)), dislikes: z.array(z.string().max(40)), likes: z.array(z.string().max(40)).optional(), mealsPerDay: z.coerce.number().int().min(2).max(6).optional() }).partial().optional(),
+      questFrequency: z.enum(["low", "normal", "high"]).optional(),
+    })
+    .optional(),
 });
 export type OnboardingInput = z.input<typeof onboardingSchema>;
 
@@ -306,6 +313,7 @@ export async function completeOnboardingAction(input: OnboardingInput): Promise<
       targets: s.targets,
       goals: s.goals ?? null,
       onboardingCompletedAt: now,
+      preferences: (s.preferences ?? {}) as never,
     });
     seedRecipes();
     if (s.routines?.morning?.length) m.createRoutine({ name: "Morning routine", timeOfDay: "morning", steps: s.routines.morning });

@@ -5,6 +5,9 @@ import { oauthConfigured } from "@/integrations/oura/client";
 import { PageHeader } from "@/components/ui/primitives";
 import { SettingsForm } from "@/components/profile/SettingsForm";
 import { OuraSettings } from "@/components/profile/OuraSettings";
+import { PlannerSettings } from "@/components/profile/PlannerSettings";
+import { aiStatus } from "@/ai/config";
+import { estimateTargets, SAFE_MIN_CALORIES } from "@/services/preferences";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Settings" };
@@ -21,6 +24,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
       <SettingsForm
         profile={{ name: profile.name, age: profile.age, timezone: profile.timezone, activeDomains: profile.activeDomains, targets: profile.targets, goals: profile.goals }}
       />
+      <PlannerSettings prefs={profile.preferences} ai={aiStatus()} estimated={(() => { const e = estimateTargets({ ...profile, goal: profile.preferences.nutrition.goal }); return { calories: e.calories, protein: e.protein }; })()} minCalories={SAFE_MIN_CALORIES(profile.sex)} />
       <OuraSettings status={oura} oauthAvailable={oauthConfigured()} flash={sp.oura === "connected" ? "Oura connected." : sp.error ? `Oura error: ${sp.error}` : null} />
       <div className="card p-4 text-xs text-muted">
         <div className="mb-1 font-medium text-text-2">Your data</div>

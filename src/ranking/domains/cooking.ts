@@ -21,6 +21,8 @@ export interface CookingInput {
   baseline?: CookingBaseline | null;
   startedOn?: ISODate | null;
   mealsPerWeekTarget?: number | null;
+  /** Nutrition tracking over the last 30 days (null when nothing is logged). Never rewards eating less. */
+  nutrition?: { loggedDays: number; proteinDays: number; windowDays: number } | null;
 }
 
 /**
@@ -67,6 +69,14 @@ const DISTINCT_RECIPES_30D: [number, number][] = [
   [8, 72],
   [12, 88],
   [16, 96],
+];
+const ADHERENCE_CURVE: [number, number][] = [
+  [0, 0],
+  [0.3, 25],
+  [0.5, 45],
+  [0.7, 65],
+  [0.85, 82],
+  [1, 98],
 ];
 const NEW_RECIPES_90D: [number, number][] = [
   [0, 20],
@@ -147,8 +157,13 @@ function computeScore(
         interpolate(COOK_DAYS_PER_WEEK, Math.min(7, input.baseline.mealsCookedPerWeek)) * 0.4
       : null;
 
+  const nut = input.nutrition;
+  const nutritionAvailable = !!nut && nut.loggedDays >= 3;
+  const loggingScore = nutritionAvailable ? interpolate(ADHERENCE_CURVE, nut!.loggedDays / Math.max(7, Math.min(30, nut!.windowDays))) : 0;
+  const proteinScore = nutritionAvailable ? interpolate(ADHERENCE_CURVE, nut!.proteinDays / Math.max(1, nut!.loggedDays)) : 0;
+
   const substats = [
-    sub("volume", "Meals cooked", interpolate(MEALS_PER_WEEK, mpw), `${round(mpw, 1)} meals/wk`, 0.35, {
+    sub("volume", "Meals cooked", interpolate(MEALS_PER_WEEK, mpw), `${round(mpw, 1)} meals/wk`, nutritionAvailable ? 0.3 : 0.35, {
       note: "Home-cooked meals per week (max 3/day), 30-day average",
       improve: `Cook ${Math.max(target, Math.ceil(mpw) + 2)}+ meals a week`,
     }),
@@ -159,8 +174,17 @@ function computeScore(
       note: `Weeks with ${Math.min(target, 5)}+ cooked meals`,
       improve: "Hit your weekly meal target more weeks in a row",
     }),
-    sub("range", "Range", diversityScore, `${distinct30} recipes (30d) · ${new90} new (90d)`, 0.2, {
+    sub("range", "Range", diversityScore, `${distinct30} recipes (30d) · ${new90} new (90d)`, nutritionAvailable ? 0.15 : 0.2, {
       improve: "Try a new recipe this month and rotate 5+ different dishes",
+    }),
+    sub("protein", "Protein consistency", proteinScore, nutritionAvailable ? `${nut!.proteinDays}/${nut!.loggedDays} logged days at target` : "log nutrition to unlock", 0.1, {
+      available: nutritionAvailable,
+      note: "Days hitting your protein target — eating less never scores points",
+      improve: "Hit your protein target on most logged days",
+    }),
+    sub("logging", "Nutrition logging", loggingScore, nutritionAvailable ? `${nut!.loggedDays} days logged (30d)` : "n/a", 0.05, {
+      available: nutritionAvailable,
+      improve: "Log meals most days — estimates are fine",
     }),
   ];
 

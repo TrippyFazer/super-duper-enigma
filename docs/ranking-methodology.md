@@ -32,6 +32,9 @@ Rolling windows: most substats use the **last 30 days**, blending in the **last 
 | Endurance | 12.5 % | Cardio minutes/week + 30 % credit for steps above 6,000/day |
 | Activity | 10 % | Average steps/day (Tudor-Locke bands) |
 | Recovery | 5 % | Penalties for <2 rest days per fortnight, 7+ day streaks, >8 hard days |
+| Progress | 7.5 % | Only once 2+ lifts are tracked in the session tracker: personal records in the last 60 days and share of tracked lifts whose estimated 1RM improved. Other weights are scaled down proportionally when it is active. |
+
+Tracked workout sessions (sets × reps × weight) create a normal `workouts` row on finish, so a session counts toward Consistency/Frequency like any logged workout. A first record on a movement is a *baseline*, not a PR; PRs are only awarded for improvements (weight at 1–12 reps, or Epley-estimated 1RM).
 
 ### Sleep (mixed) — `domains/sleep.ts`
 | Substat | Weight | Metric |
@@ -46,6 +49,8 @@ Rolling windows: most substats use the **last 30 days**, blending in the **last 
 
 ### Cooking (percentile) — `domains/cooking.ts`
 Meals cooked/week (35 %, max 3/day; 7 → ~56, 12 → 82, 18 → 97), cooking days/week (25 %), active weeks (20 %), range (20 %: distinct dishes in 30 days 60 % + new recipes in 90 days 40 %).
+
+When nutrition has been logged on 3+ days in the last 30, two optional substats activate and the others scale down: **Protein consistency** (10 %: share of logged days that hit the protein target, counted only on days with at least 80 % of the safe calorie floor) and **Nutrition logging** (5 %: logged days / 30). Nothing in the cooking score, or anywhere else, rewards eating *less*. Calorie targets below 1,200 kcal (women) / 1,500 kcal (men) are flagged in Settings and never earn XP.
 
 ### Wealth (mixed) — `domains/wealth.ts`
 Emergency-fund months (30 %; 3 → 58, 6 → 76, 12 → 93), savings rate (25 %; 10 % → 50, 15 % → 68, 20 % → 82), high-interest debt in months of income (20 %; none → 100, 3 months → 40), age-adjusted net-worth percentile (15 %, used directly), retirement balance vs the age-based salary multiple (10 %), check-in consistency + automated investing (10 %). Snapshot-based; the latest check-in is the state.
@@ -87,13 +92,15 @@ Wealth gates differently (snapshot-based): first check-in caps at B, 30 days →
 
 ## 6. XP and levels
 
-XP is the short-term loop (`xp.ts`): workout 25 (+10 for 45 min), meal 15, new recipe 20, routine 10, habit 8, sleep logged 5 / target 15 / bedtime 10, steps target 10, financial check-in 20, quests 10–100, boss quests 250–500, achievements 10–2,500, sobriety milestones 20–1,000. Every award has an idempotency key and a per-day cap, so repeated or re-logged actions never pay twice and nothing can be farmed (e.g. max 3 meals/day, 2 workouts/day, 8 habit completions/day).
+XP is the short-term loop (`xp.ts`): workout 25 (+10 for 45 min, +15 for a tracked session), personal record 50 (weight) / 75 (estimated 1RM), meal 15, new recipe 20, nutrition logged 5/day, planned meal eaten 10 (max 3/day), protein target 15/day, routine 10, habit 8, sleep logged 5 / target 15 / bedtime 10, steps target 10, financial check-in 20, quests 10–100, special quests 15–100, boss quests 250–500, achievements 10–2,500, sobriety milestones 20–1,000. Every award has an idempotency key and a per-day cap, so repeated or re-logged actions never pay twice and nothing can be farmed (e.g. max 3 meals/day, 2 workouts/day, 8 habit completions/day).
 
 Level L requires `60 · L^1.7` total XP (`levels.ts`): level 10 ≈ 3,000, 18 ≈ 8,200, 30 ≈ 19,500, 50 ≈ 46,500. Honest daily logging yields roughly 600–900 XP/week.
 
 ## 7. Quests and achievements
 
 Quests (`quests.ts`) are generated from templates that check applicability (does the user track this?) and personalise targets from recent behaviour (e.g. weekly training target = last-4-week average + 1, capped at 6). Progress is derived from logs on every reconcile; completion awards XP once. Daily quests regenerate each day, weekly ones each Monday, boss quests persist until complete.
+
+**Special quests** (`questLibrary.ts`, `services/questOffers.ts`) are optional, NPC-style offers that appear 0–2 times a day depending on the chosen frequency (low ≈ 0.6/day max 1, normal ≈ 1.1/day max 2, high ≈ 1.8/day max 2). The dice are seeded by date + time slot (morning / afternoon / evening) so a reload never re-rolls; offers are suppressed before 07:00 and after 23:00, while another offer is open, and for 3 hours after a decline or expiry. Candidates come from a curated library weighted by live signals (steps so far, meals cooked, protein progress, routines due, weakest domain) and, when an AI provider is configured, occasionally (30 % of slots) from the model. Every candidate, AI or not, must pass the same validator: safety regexes (no fasting, maximal lifts, sleep deprivation, alcohol, gambling, dares…), a sane domain, XP inside its difficulty band (common 15–30, uncommon 30–60, rare 60–100; epic 100–250 and legendary are reserved for boss quests), ≤ 90 minutes, 1–72 h expiry, and no duplicate of a title offered in the last 7 days. Declining an offer has no effect on XP, ranks, streaks or future offers. Completing one awards its XP once (`quest_special`, max 3/day).
 
 Achievements (`achievements.ts`) are declarative `check(context)` predicates evaluated after every mutation; unlocked keys are stored so they fire once. Some grant equippable titles.
 

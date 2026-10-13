@@ -3,16 +3,19 @@
 import { useState, useTransition } from "react";
 import { Star, Bookmark, ChefHat } from "lucide-react";
 import { toggleRecipeFlagAction } from "@/actions";
+import { logRecipeNutritionAction } from "@/actions/planner";
+import { useFeedback } from "@/components/feedback/FeedbackProvider";
 import { MealSheet } from "@/components/log/MealSheet";
 import { cx } from "@/components/ui/primitives";
 
-export function RecipeActions({ id, name, isFavorite, isSaved, today, timesCooked }: { id: number; name: string; isFavorite: boolean; isSaved: boolean; today: string; timesCooked: number }) {
+export function RecipeActions({ id, name, isFavorite, isSaved, today, timesCooked, hasNutrition, mealType }: { id: number; name: string; isFavorite: boolean; isSaved: boolean; today: string; timesCooked: number; hasNutrition: boolean; mealType: string }) {
+  const { notify } = useFeedback();
   const [fav, setFav] = useState(isFavorite);
   const [saved, setSaved] = useState(isSaved);
   const [open, setOpen] = useState(false);
   const [, start] = useTransition();
   return (
-    <>
+    <div className="space-y-2">
       <div className="flex gap-2">
         <button onClick={() => setOpen(true)} className="press flex flex-1 items-center justify-center gap-2 rounded-xl bg-gradient-to-b from-gold-2 to-gold px-4 py-3 text-sm font-semibold text-[#1a1406]">
           <ChefHat size={16} /> I cooked this{timesCooked === 0 ? " · +35 XP" : " · +15 XP"}
@@ -40,7 +43,15 @@ export function RecipeActions({ id, name, isFavorite, isSaved, today, timesCooke
           <Bookmark size={18} className={saved ? "fill-accent-2" : ""} />
         </button>
       </div>
+      {hasNutrition && (
+        <button
+          onClick={() => start(async () => notify(await logRecipeNutritionAction(id, (["breakfast", "lunch", "dinner", "snack"].includes(mealType) ? mealType : "dinner") as "breakfast" | "lunch" | "dinner" | "snack", true)))}
+          className="press flex w-full items-center justify-center gap-2 rounded-xl border border-gold/40 bg-gold/10 px-4 py-2.5 text-sm font-semibold text-gold"
+        >
+          Log as eaten · adds calories & macros
+        </button>
+      )}
       <MealSheet open={open} onClose={() => setOpen(false)} date={today} recipes={[]} preset={{ recipeId: id, name }} />
-    </>
+    </div>
   );
 }

@@ -30,6 +30,8 @@ export interface FitnessInput {
   /** Date the user started tracking this domain (onboarding or first log). */
   startedOn?: ISODate | null;
   stepsTarget?: number | null;
+  /** From tracked sessions: PRs and improving lifts in the last 60 days (null when no session data). */
+  strength?: { prs60: number; trackedLifts: number; improvingLifts: number } | null;
 }
 
 /**
@@ -222,20 +224,30 @@ function computeScore(
     baselineScore = bFreq * 0.45 + bStrength * 0.2 + bCardio * 0.2 + bSteps * 0.15;
   }
 
+  // Strength progress: only when sets are tracked. Rewards improving lifts, never a single max.
+  const sp = input.strength;
+  const progressAvailable = !!sp && sp.trackedLifts >= 2;
+  const progressScore = progressAvailable ? Math.min(100, 35 + Math.min(4, sp!.improvingLifts) * 12 + Math.min(6, sp!.prs60) * 3) : 0;
+
   const stepsTarget = input.stepsTarget ?? 7500;
   const substats = [
     sub("consistency", "Consistency", consistencyScore, `${activeWeeks}/${weeksAvailable} active weeks`, 0.3, {
       note: "Weeks with 3+ training days in the last 12",
       improve: "Train 3+ days in more weeks — consistency outweighs single big weeks",
     }),
-    sub("frequency", "Frequency", frequencyScore, `${round(spw, 1)} sessions/wk · ${Math.round(met30)} active min`, 0.3, {
+    sub("frequency", "Frequency", frequencyScore, `${round(spw, 1)} sessions/wk · ${Math.round(met30)} active min`, progressAvailable ? 0.275 : 0.3, {
       note: "30-day average (90-day blended in after 60 days)",
       improve: spw < 4 ? "Average 4+ sessions a week" : "Push weekly active minutes past 300",
     }),
-    sub("strength", "Strength", strengthScore, `${round(strengthDays, 1)} strength days/wk`, 0.125, {
+    sub("strength", "Strength", strengthScore, `${round(strengthDays, 1)} strength days/wk`, progressAvailable ? 0.1 : 0.125, {
       improve: "Lift or do resistance training on 2–3 days a week",
     }),
-    sub("endurance", "Endurance", enduranceScore, `${Math.round(cardioSessionMin)} cardio min/wk${walkingCredit > 0 ? " + walking" : ""}`, 0.125, {
+    sub("progress", "Strength progress", progressScore, progressAvailable ? `${sp!.improvingLifts} lifts improving · ${sp!.prs60} PRs (60d)` : "track sets to unlock", 0.075, {
+      available: progressAvailable,
+      note: "Progressive overload across tracked lifts (estimated 1RM trend)",
+      improve: "Add a rep or a little weight on your main lifts over the next few weeks",
+    }),
+    sub("endurance", "Endurance", enduranceScore, `${Math.round(cardioSessionMin)} cardio min/wk${walkingCredit > 0 ? " + walking" : ""}`, progressAvailable ? 0.1 : 0.125, {
       improve: "Build to 150+ minutes of cardio a week",
     }),
     sub("activity", "Activity", activityScore, avgSteps != null ? `${Math.round(avgSteps).toLocaleString()} steps/day` : "no step data", 0.1, {

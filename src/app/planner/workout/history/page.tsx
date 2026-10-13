@@ -1,0 +1,64 @@
+import { redirect } from "next/navigation";
+import { Trophy } from "lucide-react";
+import { getProfile } from "@/services/profile";
+import { getSession, listPersonalRecords, listSessions } from "@/services/workouts";
+import { Card, PageHeader, SectionTitle } from "@/components/ui/primitives";
+import { formatShort } from "@/lib/dates";
+
+export const dynamic = "force-dynamic";
+export const metadata = { title: "Training history" };
+
+export default function HistoryPage() {
+  const profile = getProfile();
+  if (!profile.onboarded) redirect("/onboarding");
+  const sessions = listSessions(40).filter((s) => s.status === "completed");
+  const prs = listPersonalRecords();
+  return (
+    <div className="page space-y-5">
+      <PageHeader title="Training history" subtitle={`${sessions.length} completed sessions`} back="/planner/workout" />
+      {prs.length > 0 && (
+        <section>
+          <SectionTitle>Personal records</SectionTitle>
+          <Card className="divide-y divide-border/70 p-0">
+            {prs
+              .filter((p) => p.kind === "e1rm")
+              .map((p) => (
+                <div key={p.id} className="flex items-center gap-3 px-4 py-2.5 text-sm">
+                  <Trophy size={14} className="text-gold" />
+                  <span className="flex-1 truncate">{p.exerciseName}</span>
+                  <span className="tabular text-xs text-text-2">
+                    best {p.weight}×{p.reps} · e1RM <span className="text-gold">{Math.round(p.value)}</span>
+                  </span>
+                </div>
+              ))}
+          </Card>
+        </section>
+      )}
+      {sessions.length === 0 && <Card className="text-center text-sm text-muted">No completed sessions yet.</Card>}
+      {sessions.map((s) => {
+        const full = getSession(s.id)!;
+        return (
+          <Card key={s.id} id={`s${s.id}`} className="p-0">
+            <div className="flex items-center justify-between px-4 pt-3 pb-2">
+              <div>
+                <div className="display text-[15px] font-semibold">{s.name}</div>
+                <div className="text-[11px] text-muted">
+                  {formatShort(s.date)} · {s.durationMin ?? 0} min · {s.setCount} sets · {s.volume.toLocaleString()} lb volume
+                </div>
+              </div>
+            </div>
+            <ul className="divide-y divide-border/60 border-t border-border/60">
+              {full.exercises.map((e) => (
+                <li key={e.id} className="flex items-start gap-3 px-4 py-2 text-sm">
+                  <span className="min-w-0 flex-1 truncate">{e.name}</span>
+                  <span className="tabular text-right text-xs text-text-2">{e.status === "skipped" ? "skipped" : e.sets.filter((x) => x.completed).map((x) => `${x.weight ?? "–"}×${x.reps ?? "–"}`).join(" · ") || "—"}</span>
+                </li>
+              ))}
+            </ul>
+            {s.notes && <p className="serif px-4 py-2 text-[13px] text-muted">{s.notes}</p>}
+          </Card>
+        );
+      })}
+    </div>
+  );
+}

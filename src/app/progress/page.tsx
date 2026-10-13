@@ -9,6 +9,10 @@ import { addDays, dateInTz, formatShort, lastNDays, startOfWeek } from "@/lib/da
 import { DOMAINS } from "@/ranking/domains";
 import { routineAdherence } from "@/ranking/domains/skincare";
 import { computeHabitStats } from "@/ranking/domains/habits";
+import { listSessions, listPersonalRecords } from "@/services/workouts";
+import { nutritionConsistency, resolveTargets } from "@/services/nutrition";
+import { SAFE_MIN_CALORIES } from "@/services/preferences";
+import { Dumbbell, UtensilsCrossed } from "lucide-react";
 import { Card, PageHeader, SectionTitle, Stat, Trend } from "@/components/ui/primitives";
 import { RankBadge } from "@/components/ui/RankBadge";
 import { RangeTabs } from "@/components/domain/DomainHeader";
@@ -66,6 +70,10 @@ export default async function ProgressPage({ searchParams }: { searchParams: Pro
   const avgSleep = sleepIn.length ? sleepIn.reduce((a, e) => a + e.totalSleepMin, 0) / sleepIn.length / 60 : null;
 
   const rankHist = getRankHistory().slice(0, 8);
+  const sessions = listSessions(200).filter((x) => x.status === "completed" && x.date >= start);
+  const prsIn = listPersonalRecords().filter((p) => p.date >= start && p.kind === "weight");
+  const nTargets = resolveTargets(profile.preferences.nutrition, profile);
+  const nut = nutritionConsistency(today, range, nTargets.protein, SAFE_MIN_CALORIES(profile.sex));
 
   return (
     <div className="page space-y-5">
@@ -127,6 +135,33 @@ export default async function ProgressPage({ searchParams }: { searchParams: Pro
           <SectionTitle className="mb-3 px-0">Cooking days per week</SectionTitle>
           <BarsChart data={weekly(meals.map((m) => m.date))} color="#5fcf9b" />
         </Card>
+      )}
+      {(profile.activeDomains.includes("fitness") || profile.activeDomains.includes("cooking")) && (
+        <div className="grid grid-cols-2 gap-2.5">
+          {profile.activeDomains.includes("fitness") && (
+            <Link href="/planner/workout/history" className="plate press px-4 py-3">
+              <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted">
+                <Dumbbell size={11} /> Tracked sessions
+              </div>
+              <div className="tabular display mt-1 text-xl font-semibold">{sessions.length}</div>
+              <div className="text-[11px] text-muted">
+                {prsIn.length} PR{prsIn.length === 1 ? "" : "s"} · {sessions.reduce((a, x) => a + x.volume, 0).toLocaleString()} kg lifted
+              </div>
+            </Link>
+          )}
+          {profile.activeDomains.includes("cooking") && (
+            <Link href="/planner/meals" className="plate press px-4 py-3">
+              <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted">
+                <UtensilsCrossed size={11} /> Nutrition logged
+              </div>
+              <div className="tabular display mt-1 text-xl font-semibold">
+                {nut.loggedDays}
+                <span className="text-sm text-muted">/{range} days</span>
+              </div>
+              <div className="text-[11px] text-muted">Protein target hit {nut.proteinDays} day{nut.proteinDays === 1 ? "" : "s"}</div>
+            </Link>
+          )}
+        </div>
       )}
       {(profile.activeDomains.includes("skincare") || profile.activeDomains.includes("habits")) && (
         <div className="grid grid-cols-2 gap-2.5">

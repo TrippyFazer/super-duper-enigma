@@ -1,5 +1,25 @@
 import type { Metadata, Viewport } from "next";
+import localFont from "next/font/local";
 import "./globals.css";
+
+const cinzel = localFont({
+  src: [
+    { path: "../fonts/Cinzel-500.woff2", weight: "500" },
+    { path: "../fonts/Cinzel-600.woff2", weight: "600" },
+    { path: "../fonts/Cinzel-700.woff2", weight: "700" },
+  ],
+  variable: "--font-cinzel",
+  display: "swap",
+});
+const cormorant = localFont({
+  src: [
+    { path: "../fonts/CormorantGaramond-500.woff2", weight: "500", style: "normal" },
+    { path: "../fonts/CormorantGaramond-600.woff2", weight: "600", style: "normal" },
+    { path: "../fonts/CormorantGaramond-500-italic.woff2", weight: "500", style: "italic" },
+  ],
+  variable: "--font-cormorant",
+  display: "swap",
+});
 import { BottomNav } from "@/components/nav/BottomNav";
 import { FeedbackProvider } from "@/components/feedback/FeedbackProvider";
 import { ServiceWorker } from "@/components/pwa/ServiceWorker";
@@ -27,7 +47,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className="dark" data-theme="dark">
+    <html lang="en" className={`dark ${cinzel.variable} ${cormorant.variable}`} data-theme="dark">
       <body>
         <FeedbackProvider>
           <main className="min-h-dvh">{children}</main>

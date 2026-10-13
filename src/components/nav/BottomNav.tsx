@@ -2,14 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Home, Scroll, TrendingUp, UtensilsCrossed, User } from "lucide-react";
+import { Home, Scroll, TrendingUp, CalendarDays, Shield } from "lucide-react";
 
 const TABS = [
   { href: "/", label: "Home", icon: Home, match: (p: string) => p === "/" || p.startsWith("/domains") },
   { href: "/quests", label: "Quests", icon: Scroll, match: (p: string) => p.startsWith("/quests") },
   { href: "/progress", label: "Progress", icon: TrendingUp, match: (p: string) => p.startsWith("/progress") },
-  { href: "/recipes", label: "Recipes", icon: UtensilsCrossed, match: (p: string) => p.startsWith("/recipes") },
-  { href: "/profile", label: "Profile", icon: User, match: (p: string) => p.startsWith("/profile") },
+  { href: "/planner", label: "Planner", icon: CalendarDays, match: (p: string) => p.startsWith("/planner") || p.startsWith("/recipes") || p.startsWith("/coach") },
+  { href: "/profile", label: "Profile", icon: Shield, match: (p: string) => p.startsWith("/profile") || p.startsWith("/notifications") },
 ];
 
 export function BottomNav() {
