@@ -15,3 +15,4 @@ data/*.db-shm
 coverage/
 *.tsbuildinfo
 next-env.d.ts
+.env.production

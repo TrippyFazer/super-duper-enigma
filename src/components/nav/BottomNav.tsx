@@ -14,7 +14,7 @@ const TABS = [
 
 export function BottomNav() {
   const pathname = usePathname() || "/";
-  if (pathname.startsWith("/onboarding") || pathname.startsWith("/offline")) return null;
+  if (pathname.startsWith("/onboarding") || pathname.startsWith("/offline") || pathname.startsWith("/login")) return null;
   return (
     <nav
       aria-label="Primary"

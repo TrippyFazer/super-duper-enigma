@@ -2,8 +2,8 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "Ascend — Life RPG",
-    short_name: "Ascend",
+    name: "TFHealth",
+    short_name: "TFHealth",
     description: "Your real life, ranked E through S.",
     start_url: "/",
     display: "standalone",

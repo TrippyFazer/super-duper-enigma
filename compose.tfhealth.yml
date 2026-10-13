@@ -1,0 +1,18 @@
+# TFHealth on the shared server. Its own project, network and volume; nothing
+# here touches the Procurement or DNA Ops stacks. The production Caddy joins
+# the tfhealth network to reach it, and serves it at tfhealth.<domain>.
+name: tfhealth
+services:
+  app:
+    build: .
+    container_name: tfhealth-app
+    restart: unless-stopped
+    env_file: .env.production
+    volumes:
+      - tfhealth-data:/data
+    networks: [tfhealth]
+volumes:
+  tfhealth-data:
+networks:
+  tfhealth:
+    name: tfhealth
