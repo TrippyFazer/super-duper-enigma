@@ -80,7 +80,11 @@ export function routineStreak(routines: RoutineInput[], completions: RoutineComp
   const active = routines.filter((r) => r.active);
   if (active.length === 0) return 0;
   const done = new Set(completions.filter((c) => c.complete).map((c) => `${c.routineId}:${c.date}`));
-  const allDone = (d: ISODate) => active.every((r) => (r.createdOn && d < r.createdOn) || done.has(`${r.id}:${d}`));
+  const applicable = (d: ISODate) => active.filter((r) => !r.createdOn || d >= r.createdOn);
+  const allDone = (d: ISODate) => {
+    const rs = applicable(d);
+    return rs.length > 0 && rs.every((r) => done.has(`${r.id}:${d}`));
+  };
   let streak = 0;
   let d = asOf;
   // Today doesn't break the streak if it is simply not finished yet.

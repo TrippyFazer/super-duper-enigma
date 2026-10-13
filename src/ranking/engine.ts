@@ -91,7 +91,7 @@ export function assessCharacter(input: EngineInput): CharacterAssessment {
       .sort((a, b) => b.gap - a.gap)
       .slice(0, 4);
     for (const { d } of gaps) {
-      const firstReq = d.next.requirements[0];
+      const firstReq = d.sufficiency === "none" && d.suggestedAction ? d.suggestedAction : d.next.requirements[0];
       requirements.push(`${DOMAINS[d.domain].name}: ${firstReq ?? `reach ${Math.round(floor)} score`}`);
     }
   }
