@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { getDb } from "@/db/client";
 import { dailyActivity, integrations, sleepEntries } from "@/db/schema";
 import { addDays, type ISODate } from "@/lib/dates";
-import { awardXp } from "@/services/xp";
+import { awardXp, voidXpByKey } from "@/services/xp";
 import { getProfile } from "@/services/profile";
 import { fetchOuraRange, OuraError, refreshAccessToken, type OuraFetchResult } from "./client";
 
@@ -84,8 +84,10 @@ export async function syncOura(days = 30): Promise<SyncResult> {
   const token = await resolveToken();
   if (!token) return { ok: false, nights: 0, activityDays: 0, error: "No Oura token configured." };
 
-  const end = profile.today;
-  const start = addDays(end, -days);
+  // Oura's end_date is EXCLUSIVE, and it files last night under today's date.
+  // Ending at today left last night out of every sync.
+  const end = addDays(profile.today, 1);
+  const start = addDays(profile.today, -days);
   let data: OuraFetchResult;
   try {
     data = await fetchOuraRange(token, start, end);
@@ -121,17 +123,14 @@ export function applyOuraData(data: OuraFetchResult, sleepTargetMin: number, ste
       byDay.set(s.day, s);
     }
   }
-  // Add naps to total sleep for the day.
-  const napsByDay = new Map<string, number>();
-  for (const s of data.sleep) {
-    if (s.type === "late_nap" || (s.type === "sleep" && byDay.get(s.day)?.id !== s.id)) {
-      napsByDay.set(s.day, (napsByDay.get(s.day) ?? 0) + (s.total_sleep_duration ?? 0));
-    }
-  }
+  // Naps are NOT added to the night. Oura files an afternoon rest under the
+  // next morning's day, and can record the same rest twice as overlapping
+  // periods (seen: 4:13-7:15 PM and 4:13-5:05 PM on one afternoon), so adding
+  // them turned an 8h20m night into "10h09m". A night is the main sleep only.
 
   let nights = 0;
   for (const [day, s] of byDay) {
-    const total = Math.round(((s.total_sleep_duration ?? 0) + (napsByDay.get(day) ?? 0)) / 60);
+    const total = Math.round((s.total_sleep_duration ?? 0) / 60);
     if (total <= 0) continue;
     const row = {
       date: day as ISODate,
@@ -152,6 +151,9 @@ export function applyOuraData(data: OuraFetchResult, sleepTargetMin: number, ste
       .run();
     awardXp("sleep_logged", day, { source: { type: "sleep", id: day } });
     if (total >= sleepTargetMin) awardXp("sleep_target", day, { source: { type: "sleep", id: day } });
+    // Re-synced below target (e.g. a night that only "hit" it with a nap added,
+    // before naps stopped counting): the target XP goes, as for a manual correction.
+    else voidXpByKey(`sleep_target:${day}`, "Oura re-sync: night below target");
     nights++;
   }
 
