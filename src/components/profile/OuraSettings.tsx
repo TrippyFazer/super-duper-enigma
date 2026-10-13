@@ -7,7 +7,7 @@ import { useFeedback } from "@/components/feedback/FeedbackProvider";
 import { Button, Card, Field, inputClass } from "@/components/ui/primitives";
 import type { OuraStatus } from "@/integrations/oura/sync";
 
-export function OuraSettings({ status, oauthAvailable, flash }: { status: OuraStatus; oauthAvailable: boolean; flash: string | null }) {
+export function OuraSettings({ status, oauthAvailable, flash, autoSyncHours = 0 }: { status: OuraStatus; oauthAvailable: boolean; flash: string | null; autoSyncHours?: number }) {
   const { toast } = useFeedback();
   const [token, setToken] = useState("");
   const [pending, start] = useTransition();
@@ -26,6 +26,7 @@ export function OuraSettings({ status, oauthAvailable, flash }: { status: OuraSt
           <p className="text-xs text-muted">
             Auth: {status.authType === "env" ? "token from environment" : status.authType === "oauth" ? "OAuth" : "personal token"}.{" "}
             {status.lastSyncAt ? `Last sync ${new Date(status.lastSyncAt).toLocaleString()} (${status.lastSyncStatus}).` : "Not synced yet."}
+            {autoSyncHours > 0 && ` Syncs by itself every ${autoSyncHours} hours.`}
             {status.lastError ? ` Last error: ${status.lastError}` : ""}
           </p>
           <div className="flex gap-2">

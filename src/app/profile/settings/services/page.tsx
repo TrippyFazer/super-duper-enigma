@@ -1,3 +1,4 @@
+import { autoSyncHours } from "@/services/autoSync";
 import { redirect } from "next/navigation";
 import { getProfile } from "@/services/profile";
 import { getOuraStatus } from "@/integrations/oura/sync";
@@ -21,7 +22,7 @@ export default async function ServicesPage({ searchParams }: { searchParams: Pro
     <div className="page space-y-5">
       <PageHeader title="Connected services" subtitle="Where your health data comes from. Manual logging always works." back="/profile/settings" />
       <AppleHealthSettings status={health} appUrl={appUrl} sampleCount={sampleCount()} pending={pendingWorkoutMatches().map((p) => ({ id: p.id, activityType: p.activityType, startAt: p.startAt, durationMin: p.durationMin, sourceName: p.sourceName, suggested: p.suggested ? { id: p.suggested.id, type: p.suggested.type, durationMin: p.suggested.durationMin, date: p.suggested.date, notes: p.suggested.notes } : null }))} />
-      <OuraSettings status={oura} oauthAvailable={oauthConfigured()} flash={sp.oura === "connected" ? "Oura connected." : sp.error ? `Oura error: ${sp.error}` : null} />
+      <OuraSettings status={oura} oauthAvailable={oauthConfigured()} autoSyncHours={autoSyncHours()} flash={sp.oura === "connected" ? "Oura connected." : sp.error ? `Oura error: ${sp.error}` : null} />
       <p className="serif px-1 text-[12.5px] text-muted">Oura direct sync is optional. If your ring already writes to Apple Health, connect Apple Health instead and leave this off to avoid double-counting.</p>
     </div>
   );
