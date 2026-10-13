@@ -63,6 +63,10 @@ Source, device and timestamps are preserved on every stored sample (`health_samp
 
 ## Option A — iOS Shortcut (no code, works today)
 
+> **Step-by-step, current version: [apple-health-shortcut.md](apple-health-shortcut.md).** The UUID is
+> optional; without it duplicates are caught by type + start + end + source. The outline below is the
+> original sketch.
+
 1. Settings → Connected services → **Connect Apple Health**. Copy the token (shown once).
 2. On the iPhone, open **Shortcuts** and create "Ascend Health Sync":
    * **Find Health Samples** — Type: *Steps*, Start Date is in the last 2 days, sort by Start
