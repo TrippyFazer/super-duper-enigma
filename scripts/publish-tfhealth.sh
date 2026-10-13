@@ -61,7 +61,7 @@ docker exec -w /etc/caddy procurement-caddy caddy reload --config /etc/caddy/Cad
 
 echo "==> Waiting for the certificate"
 for _ in $(seq 1 20); do
-  NEW="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "https://${HOST}/" || echo 000)"
+  NEW="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "https://${HOST}/" || true)"
   [ "$NEW" != "000" ] && break
   sleep 3
 done
