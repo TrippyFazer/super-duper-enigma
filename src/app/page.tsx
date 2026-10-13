@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
-import { ChevronRight, CalendarCheck, Trophy } from "lucide-react";
+import { ChevronRight, CalendarCheck, Trophy, Sunrise, CalendarRange, UtensilsCrossed } from "lucide-react";
 import { getProfile } from "@/services/profile";
 import { getQuests, getUnlockedAchievements, reconcile } from "@/services/progression";
 import { loadHabitCompletions, loadHabits, loadRecipes, loadRoutineCompletions, loadRoutines } from "@/services/loaders";
@@ -9,7 +9,13 @@ import { computeHabitStats } from "@/ranking/domains/habits";
 import { getOuraStatus } from "@/integrations/oura/sync";
 import { isAiEnabled } from "@/ai/config";
 import { refreshOffers, todayPlanSummary } from "@/services/planner";
-import { unreadCount } from "@/services/notifications";
+import { unreadCount, listNotifications } from "@/services/notifications";
+import { runScheduledNotifications } from "@/services/scheduler";
+import { computeSleepSchedule } from "@/services/sleepPlan";
+import { SleepScheduleCard } from "@/components/sleep/SleepScheduleCard";
+import { getMealPlan } from "@/services/nutrition";
+import { getWeek, planningWeekStart } from "@/services/foodWeek";
+import { addDays } from "@/lib/dates";
 import { startOfWeek, dateInTz, weekday } from "@/lib/dates";
 import { CharacterHero } from "@/components/hero/CharacterHero";
 import { SpecialQuestCard } from "@/components/quests/SpecialQuestCard";
@@ -21,6 +27,11 @@ import { NextRankCard } from "@/components/home/NextRankCard";
 import { QuickLog } from "@/components/log/QuickLog";
 import { SectionTitle } from "@/components/ui/primitives";
 import { BrowserNotifier } from "@/components/notifications/BrowserNotifier";
+import { HealthCards } from "@/components/home/HealthCards";
+import { todayHealthSnapshot } from "@/health/apple";
+import { loadSleep } from "@/services/loaders";
+import { listOffers } from "@/services/questOffers";
+import { lastNDays } from "@/lib/dates";
 
 export const dynamic = "force-dynamic";
 
@@ -29,6 +40,7 @@ export default async function HomePage() {
   if (!profile.onboarded) redirect("/onboarding");
 
   const { assessment } = reconcile();
+  runScheduledNotifications(profile);
   const offer = await refreshOffers(profile);
   const today = profile.today;
   const quests = getQuests(today);
@@ -36,6 +48,20 @@ export default async function HomePage() {
   const oura = getOuraStatus();
   const plan = todayPlanSummary(profile);
   const unread = unreadCount();
+  const health = todayHealthSnapshot();
+  const localHour = Number(profile.localTime.slice(0, 2));
+  const stepsRemaining = health.steps != null ? Math.max(0, profile.targets.stepsTarget - health.steps) : 0;
+  const walkOffer = health.steps != null && localHour >= 16 && localHour < 22 && stepsRemaining > 0 && stepsRemaining <= 4000 ? { remaining: stepsRemaining, xp: stepsRemaining >= 2500 ? 40 : 25 } : null;
+  const hasWalkQuest = listOffers({ statuses: ["accepted", "offered", "completed"], limit: 5 }).some((o) => o.templateKey === "steps-finish" && o.date === today);
+  const consistency = (() => {
+    const nights = loadSleep(today).filter((e) => e.date >= lastNDays(today, 8)[0] && e.bedtimeStart);
+    const mins = nights.map((e) => { const m = e.bedtimeStart!.match(/T(\d{2}):(\d{2})/); if (!m) return null; let v = Number(m[1]) * 60 + Number(m[2]); if (v < 240) v += 1440; return v; }).filter((x): x is number => x != null);
+    if (mins.length < 3) return null;
+    const last = mins[mins.length - 1];
+    const avg = mins.reduce((a, b) => a + b, 0) / mins.length;
+    const d = Math.abs(last - avg);
+    return d <= 30 ? ("Good" as const) : d <= 60 ? ("Fair" as const) : ("Off" as const);
+  })();
 
   const routines = loadRoutines().filter((r) => r.active);
   const rc = loadRoutineCompletions(today);
@@ -61,13 +87,38 @@ export default async function HomePage() {
   const showReview = weekday(today) >= 1 && weekday(today) <= 2 && startOfWeek(today) !== dateInTz(new Date(profile.onboardingCompletedAt ?? ""), profile.timezone);
   const LINK: Record<string, string> = { fitness: "/planner/workout", sleep: "/domains/sleep", cooking: "/planner/meals", wealth: "/domains/wealth", skincare: "/domains/skincare", sobriety: "/domains/sobriety", habits: "/domains/habits" };
 
-  return (
-    <div className="page space-y-5">
-      <CharacterHero name={profile.name} equippedTitle={profile.equippedTitle} assessment={assessment} unread={unread} />
-      <BrowserNotifier enabled={profile.preferences.notifications.browser} />
+  // ---- Time-of-day prioritisation: the same cards, ordered by what is useful now.
+  const period: "morning" | "midday" | "evening" = localHour < 11 ? "morning" : localHour < 17 ? "midday" : "evening";
+  const morningNote = period === "morning" ? listNotifications(20).find((n) => n.key === `n:morning:${today}`) ?? null : null;
+  const sched = computeSleepSchedule(profile.targets, profile.preferences.sleep);
+  const tomorrow = addDays(today, 1);
+  const tomorrowMeals = getMealPlan(tomorrow)?.meals.filter((m) => m.status === "planned" || m.status === "prepared") ?? [];
+  const tomorrowTraining = profile.preferences.fitness.trainingDays.length ? profile.preferences.fitness.trainingDays.includes(weekday(tomorrow)) : null;
+  const shoppingDay = weekday(today) === profile.preferences.food.shoppingDay;
+  const planningWeek = getWeek(planningWeekStart(today, profile.preferences.food.shoppingDay));
+  const showSunday = profile.activeDomains.includes("cooking") && (shoppingDay || weekday(today) === 6) && (!planningWeek || planningWeek.status === "planning");
+  const remainingCal = plan.targets.calories - plan.totals.calories;
+  const remainingPro = plan.targets.protein - plan.totals.protein;
 
-      {offer && <SpecialQuestCard offer={{ id: offer.id, title: offer.title, description: offer.description, domain: offer.domain, difficulty: offer.difficulty, kind: offer.kind, estimatedMinutes: offer.estimatedMinutes, xpReward: offer.xpReward, status: offer.status, expiresAt: offer.expiresAt }} />}
-
+  const sections: Record<string, React.ReactNode> = {
+    morning: morningNote ? (
+      <Link href="/profile" className="plate press flex items-start gap-3 px-4 py-3">
+        <Sunrise size={16} className="mt-0.5 shrink-0 text-gold" />
+        <p className="serif text-[15px] leading-snug text-text">{morningNote.body}</p>
+      </Link>
+    ) : null,
+    sunday: showSunday ? (
+      <Link href="/planner/week" className="plate press flex items-center gap-3 border-gold/40 px-4 py-3">
+        <CalendarRange size={18} className="shrink-0 text-gold" />
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-medium">Prepare for the week ahead</div>
+          <div className="serif text-[13px] text-muted">Review · leftovers · budget · meals · shopping list · prep · training days.</div>
+        </div>
+        <ChevronRight size={16} className="text-faint" />
+      </Link>
+    ) : null,
+    offer: offer ? <SpecialQuestCard offer={{ id: offer.id, title: offer.title, description: offer.description, domain: offer.domain, difficulty: offer.difficulty, kind: offer.kind, estimatedMinutes: offer.estimatedMinutes, xpReward: offer.xpReward, status: offer.status, expiresAt: offer.expiresAt }} /> : null,
+    quests: (
       <section>
         <SectionTitle
           action={
@@ -86,9 +137,10 @@ export default async function HomePage() {
           {quests.daily.length > 0 && <div className="serif px-4 py-2 text-[13px] text-muted">{dailyDone === quests.daily.length ? "Today's adventure is complete. Rest well." : `Complete ${quests.daily.length - dailyDone} more to finish today's adventure.`}</div>}
         </div>
       </section>
-
-      <TodayChecklist items={checklist} today={today} />
-
+    ),
+    health: <HealthCards steps={health.steps} stepsTarget={profile.targets.stepsTarget} stepsSource={health.stepsSource} lastNight={health.lastNight} sleepTargetMin={profile.targets.sleepTargetMin} plannedBed={profile.targets.bedtimeTarget} plannedWake={profile.preferences.sleep.wakeTarget} consistency={consistency} walkOffer={walkOffer} hasWalkQuest={hasWalkQuest} />,
+    checklist: <TodayChecklist items={checklist} today={today} />,
+    plan: (
       <PlanCard
         p={{
           workout: plan.workout,
@@ -101,33 +153,58 @@ export default async function HomePage() {
           showNutrition: profile.activeDomains.includes("cooking"),
         }}
       />
-
+    ),
+    remaining:
+      period === "evening" && profile.activeDomains.includes("cooking") && plan.totals.calories > 0 ? (
+        <Link href="/planner/meals" className="plate press flex items-center gap-3 px-4 py-3">
+          <UtensilsCrossed size={16} className="shrink-0 text-gold" />
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-medium">{remainingCal > 0 ? `${remainingCal} kcal and ${Math.max(0, remainingPro)} g protein left today` : "You're at today's calorie target"}</div>
+            <div className="serif text-[13px] text-muted">{remainingPro > 20 ? "Dinner or a protein snack closes the gap. Nothing is lost by stopping here either." : "Protein is handled. Rest well."}</div>
+          </div>
+          <ChevronRight size={16} className="text-faint" />
+        </Link>
+      ) : null,
+    sleep: period === "evening" && profile.activeDomains.includes("sleep") ? <SleepScheduleCard sched={sched} lastNight={null} compact /> : null,
+    tomorrow:
+      period === "evening" && (tomorrowMeals.length > 0 || tomorrowTraining != null) ? (
+        <section className="plate px-4 py-3">
+          <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-gold">
+            <Sunrise size={11} /> Tomorrow
+          </div>
+          <div className="serif mt-1 text-[13.5px] text-text-2">
+            {tomorrowTraining != null && <span>{tomorrowTraining ? "Training day. " : "Rest day. "}</span>}
+            {tomorrowMeals.length > 0 ? `Planned: ${tomorrowMeals.map((m) => m.name).slice(0, 3).join(", ")}${tomorrowMeals.length > 3 ? "…" : ""}.` : ""}
+          </div>
+        </section>
+      ) : null,
+    quicklog: (
       <section>
         <SectionTitle>Quick log</SectionTitle>
         <Suspense>
           <QuickLog today={today} activeDomains={profile.activeDomains} recipes={recipes} stepsTarget={profile.targets.stepsTarget} bedtimeTarget={profile.targets.bedtimeTarget} hasOura={oura.enabled && oura.connected} />
         </Suspense>
       </section>
-
-      {showReview && (
-        <Link href="/progress/review" className="plate press flex items-center gap-3 px-4 py-3">
-          <CalendarCheck size={16} className="shrink-0 text-gold" />
-          <div className="min-w-0 flex-1">
-            <div className="text-sm font-medium">Last week&apos;s review is ready</div>
-            <div className="serif text-[13px] text-muted">What moved, what slipped, what to focus on.</div>
-          </div>
-          <ChevronRight size={16} className="text-faint" />
-        </Link>
-      )}
-
+    ),
+    review: showReview ? (
+      <Link href="/progress/review" className="plate press flex items-center gap-3 px-4 py-3">
+        <CalendarCheck size={16} className="shrink-0 text-gold" />
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-medium">Last week&apos;s review is ready</div>
+          <div className="serif text-[13px] text-muted">What moved, what slipped, what to focus on.</div>
+        </div>
+        <ChevronRight size={16} className="text-faint" />
+      </Link>
+    ) : null,
+    domains: (
       <section>
         <SectionTitle action={<span className="display text-[11px] tracking-widest text-gold">OVERALL: {assessment.overall.rank} RANK</span>}>Domain stats</SectionTitle>
         <DomainGrid domains={assessment.domains} />
       </section>
-
-      <NextRankCard assessment={assessment} />
-
-      {recentAch.length > 0 && (
+    ),
+    nextRank: <NextRankCard assessment={assessment} />,
+    achievements:
+      recentAch.length > 0 ? (
         <section>
           <SectionTitle
             action={
@@ -150,7 +227,19 @@ export default async function HomePage() {
             ))}
           </div>
         </section>
-      )}
+      ) : null,
+  };
+  const ORDER: Record<typeof period, string[]> = {
+    morning: ["morning", "sunday", "offer", "quests", "plan", "checklist", "health", "quicklog", "review", "domains", "nextRank", "achievements"],
+    midday: ["sunday", "offer", "quests", "plan", "health", "checklist", "quicklog", "review", "domains", "nextRank", "achievements"],
+    evening: ["remaining", "offer", "sunday", "sleep", "tomorrow", "quests", "plan", "health", "checklist", "quicklog", "review", "domains", "nextRank", "achievements"],
+  };
+
+  return (
+    <div className="page space-y-5">
+      <CharacterHero name={profile.name} equippedTitle={profile.equippedTitle} assessment={assessment} unread={unread} />
+      <BrowserNotifier enabled={profile.preferences.notifications.browser} />
+      {ORDER[period].map((k) => (sections[k] ? <div key={k}>{sections[k]}</div> : null))}
     </div>
   );
 }

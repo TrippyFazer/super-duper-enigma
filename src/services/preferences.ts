@@ -17,6 +17,8 @@ export interface FitnessPrefs {
   workoutLengthMin: number;
   injuries: string;
   preferences: string;
+  /** chosen training weekdays (0 = Sunday); empty = flexible */
+  trainingDays: number[];
 }
 
 export interface NutritionPrefs {
@@ -43,6 +45,30 @@ export interface NotificationPrefs {
   sobriety: boolean;
   review: boolean;
   browser: boolean; // show OS notifications when the app is open
+  /** Scheduled reminders (all independently switchable) */
+  morningMotivation: boolean;
+  windDown: boolean;
+  /** minutes before wind-down time: 0 = at wind-down, 15/30/60 or custom */
+  windDownLeadMin: number;
+  workoutReminder: boolean;
+  workoutReminderTime: string; // "17:00"
+  mealPrepReminder: boolean; // Sunday
+  weeklyPlanning: boolean; // Sunday
+  weeklyPlanningTime: string; // "10:00"
+}
+
+export interface SleepPrefs {
+  /** target wake time "07:30" (local) */
+  wakeTarget: string | null;
+  /** minutes of wind-down before getting into bed */
+  windDownMin: number;
+  /** typical minutes from in-bed to asleep */
+  fallAsleepMin: number;
+}
+
+export interface MotivationPrefs {
+  /** last template keys used, newest last (avoid repeats) */
+  recent: string[];
 }
 
 export interface AiPrefs {
@@ -51,20 +77,37 @@ export interface AiPrefs {
   baseUrl: string | null;
 }
 
+export interface FoodPlanPrefs {
+  weeklyBudget: number;
+  budgetMode: "budget" | "balanced" | "flexible";
+  shoppingDay: number; // 0 = Sunday
+  quickWeekdays: boolean;
+  mealPrep: boolean;
+  highProtein: boolean;
+  reuseIngredients: boolean;
+  eatingOutPerWeek: number;
+}
+
 export interface Preferences {
   fitness: FitnessPrefs;
   nutrition: NutritionPrefs;
   questFrequency: QuestFrequency;
   notifications: NotificationPrefs;
   ai: AiPrefs;
+  sleep: SleepPrefs;
+  motivation: MotivationPrefs;
+  food: FoodPlanPrefs;
 }
 
 export const DEFAULT_PREFERENCES: Preferences = {
-  fitness: { goal: "general", experience: "beginner", daysPerWeek: 3, equipment: ["dumbbell", "bodyweight"], workoutLengthMin: 45, injuries: "", preferences: "" },
+  fitness: { goal: "general", experience: "beginner", daysPerWeek: 3, equipment: ["dumbbell", "bodyweight"], workoutLengthMin: 45, injuries: "", preferences: "", trainingDays: [] },
   nutrition: { goal: "maintain", calorieTarget: null, proteinTarget: null, carbTarget: null, fatTarget: null, dietPrefs: [], dislikes: [], likes: [], mealsPerDay: 3, maxPrepMin: 30, budget: "medium" },
   questFrequency: "normal",
-  notifications: { quest: true, workout: true, meals: true, level: true, rank: true, achievement: true, sobriety: true, review: true, browser: false },
+  notifications: { quest: true, workout: true, meals: true, level: true, rank: true, achievement: true, sobriety: true, review: true, browser: false, morningMotivation: true, windDown: true, windDownLeadMin: 0, workoutReminder: false, workoutReminderTime: "17:00", mealPrepReminder: true, weeklyPlanning: true, weeklyPlanningTime: "10:00" },
   ai: { provider: "none", model: null, baseUrl: null },
+  sleep: { wakeTarget: null, windDownMin: 30, fallAsleepMin: 15 },
+  motivation: { recent: [] },
+  food: { weeklyBudget: 80, budgetMode: "balanced", shoppingDay: 0, quickWeekdays: true, mealPrep: true, highProtein: true, reuseIngredients: true, eatingOutPerWeek: 2 },
 };
 
 export function mergePreferences(raw: Partial<Preferences> | null | undefined): Preferences {
@@ -74,6 +117,9 @@ export function mergePreferences(raw: Partial<Preferences> | null | undefined): 
     questFrequency: raw?.questFrequency ?? DEFAULT_PREFERENCES.questFrequency,
     notifications: { ...DEFAULT_PREFERENCES.notifications, ...(raw?.notifications ?? {}) },
     ai: { ...DEFAULT_PREFERENCES.ai, ...(raw?.ai ?? {}) },
+    sleep: { ...DEFAULT_PREFERENCES.sleep, ...(raw?.sleep ?? {}) },
+    motivation: { ...DEFAULT_PREFERENCES.motivation, ...(raw?.motivation ?? {}) },
+    food: { ...DEFAULT_PREFERENCES.food, ...(raw?.food ?? {}) },
   };
 }
 

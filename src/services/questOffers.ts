@@ -6,7 +6,7 @@ import { parseJson, toJson } from "@/lib/json";
 import type { ProgressionContext } from "@/ranking/context";
 import { DIFFICULTY_XP, QUEST_LIBRARY, violatesSafety, type LibraryQuest, type OfferSignals, type QuestDifficulty } from "@/ranking/questLibrary";
 import type { QuestFrequency } from "./preferences";
-import { awardXp, type XpAward } from "./xp";
+import { awardXp, voidXpForSource, type XpAward } from "./xp";
 
 /**
  * Optional quest offers.
@@ -205,8 +205,53 @@ export function completeOffer(id: number, today: ISODate, now = new Date()): { o
     return { offer: { ...o, status: "expired" }, xp: null };
   }
   db.update(questOffers).set({ status: "completed", completedAt: now.toISOString(), acceptedAt: o.acceptedAt ?? now.toISOString() }).where(eq(questOffers.id, id)).run();
-  const xp = awardXp("quest_special", today, { suffix: id, amount: o.xpReward, description: `Special quest: ${o.title}` });
+  const xp = awardXp("quest_special", today, { suffix: id, amount: o.xpReward, description: `Special quest: ${o.title}`, source: { type: "offer", id } });
   return { offer: db.select().from(questOffers).where(eq(questOffers.id, id)).get() ?? null, xp };
+}
+
+/**
+ * Cross-system offer: steps are close to target in the evening → a short walk
+ * quest, created already-accepted because the user tapped it. One per day.
+ */
+export function offerStepQuest(input: { today: ISODate; now: Date; remaining: number }): QuestOffer | null {
+  const db = getDb();
+  const existing = db.select().from(questOffers).where(and(eq(questOffers.date, input.today), eq(questOffers.templateKey, "steps-finish"))).get();
+  if (existing) return existing;
+  const open = openOffer();
+  if (open) return null;
+  const minutes = Math.max(10, Math.min(30, Math.round(input.remaining / 110)));
+  const xp = input.remaining >= 2500 ? 40 : 25;
+  return db
+    .insert(questOffers)
+    .values({
+      templateKey: "steps-finish",
+      source: "library",
+      title: `Walk the last ${input.remaining.toLocaleString()} steps`,
+      description: `About ${minutes} minutes at an easy pace closes today's step target.`,
+      domain: "fitness",
+      difficulty: input.remaining >= 2500 ? "uncommon" : "common",
+      kind: "side",
+      estimatedMinutes: minutes,
+      xpReward: xp,
+      status: "accepted",
+      date: input.today,
+      offeredAt: input.now.toISOString(),
+      acceptedAt: input.now.toISOString(),
+      expiresAt: new Date(input.now.getTime() + 5 * 3600_000).toISOString(),
+      params: toJson({ remaining: input.remaining }),
+    })
+    .returning()
+    .get();
+}
+
+/** Undo an accidental "complete" on a special quest: back to accepted, XP voided. */
+export function uncompleteOffer(id: number): QuestOffer | null {
+  const db = getDb();
+  const o = db.select().from(questOffers).where(eq(questOffers.id, id)).get();
+  if (!o || o.status !== "completed") return o ?? null;
+  voidXpForSource({ type: "offer", id }, "special quest completion undone");
+  db.update(questOffers).set({ status: "accepted", completedAt: null }).where(eq(questOffers.id, id)).run();
+  return db.select().from(questOffers).where(eq(questOffers.id, id)).get() ?? null;
 }
 
 export function listOffers(opts: { limit?: number; statuses?: string[] } = {}) {

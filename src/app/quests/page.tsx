@@ -6,6 +6,7 @@ import { refreshOffers } from "@/services/planner";
 import { listOffers } from "@/services/questOffers";
 import { PageHeader, SectionTitle, cx } from "@/components/ui/primitives";
 import { QuestRow } from "@/components/quests/QuestRow";
+import { UndoOfferButton } from "@/components/quests/UndoOfferButton";
 import { SpecialQuestCard } from "@/components/quests/SpecialQuestCard";
 import { formatShort } from "@/lib/dates";
 
@@ -111,6 +112,7 @@ export default async function QuestsPage() {
                   <div className="text-[11px] text-faint">{formatShort(o.date)} · +{o.xpReward} XP</div>
                 </div>
                 <span className={cx("text-[11px] uppercase tracking-wider", STATUS[o.status]?.cls)}>{STATUS[o.status]?.label ?? o.status}</span>
+                {o.status === "completed" && o.date === profile.today && <UndoOfferButton id={o.id} />}
               </div>
             ))}
           </div>

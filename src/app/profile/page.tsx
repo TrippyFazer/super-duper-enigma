@@ -10,6 +10,8 @@ import { RANK_VISUALS } from "@/ranking/rankVisuals";
 import { Card, PageHeader, ProgressBar, SectionTitle, cx } from "@/components/ui/primitives";
 import { RankBadge, RANK_COLOR } from "@/components/ui/RankBadge";
 import { TitlePicker } from "@/components/profile/TitlePicker";
+import { MotivationEditor } from "@/components/profile/MotivationEditor";
+import { listReasons } from "@/services/motivation";
 import { formatShort } from "@/lib/dates";
 
 export const dynamic = "force-dynamic";
@@ -94,6 +96,8 @@ export default function ProfilePage() {
           <Settings size={16} className="text-gold" /> Settings <ChevronRight size={14} className="ml-auto text-faint" />
         </Link>
       </div>
+
+      <MotivationEditor compact reasons={listReasons(true).map((r) => ({ id: r.id, text: r.text, active: r.active }))} />
 
       <section id="achievements">
         <SectionTitle>

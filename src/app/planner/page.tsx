@@ -1,6 +1,10 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { Dumbbell, UtensilsCrossed, ChefHat, MessageCircle, ChevronRight, Sparkles, Trophy } from "lucide-react";
+import { Dumbbell, UtensilsCrossed, ChefHat, MessageCircle, ChevronRight, Sparkles, Trophy, CalendarRange, Package } from "lucide-react";
+import { getWeek, planningWeekStart, weekFeedback } from "@/services/foodWeek";
+import { pantryCount } from "@/services/pantry";
+import { startOfWeek } from "@/lib/dates";
+import { WeekFeedbackCard } from "@/components/food/WeekFeedbackCard";
 import { getProfile } from "@/services/profile";
 import { todayPlanSummary } from "@/services/planner";
 import { isAiEnabled } from "@/ai/config";
@@ -19,6 +23,10 @@ export default function PlannerPage() {
   const ai = isAiEnabled();
   const sessions = listSessions(3);
   const prs = listPersonalRecords().filter((p) => p.kind === "weight").slice(0, 3);
+  const thisWeek = getWeek(startOfWeek(profile.today));
+  const planningWeek = getWeek(planningWeekStart(profile.today, profile.preferences.food.shoppingDay));
+  const pantryN = pantryCount();
+  const weekSub = planningWeek && planningWeek.status !== "planning" ? `${planningWeek.status === "planned" ? "Planned" : planningWeek.status === "shopped" ? "Shopped" : "Reviewed"} · ~$${(planningWeek.estimatedCost ?? 0).toFixed(0)} of $${planningWeek.budget}` : "Sunday reset: review, leftovers, budget, meals, list, prep";
 
   const Tile = ({ href, icon: Icon, title, sub }: { href: string; icon: typeof Dumbbell; title: string; sub: string }) => (
     <Link href={href} className="plate press flex items-center gap-3 px-4 py-3.5">
@@ -40,9 +48,12 @@ export default function PlannerPage() {
       <div className="space-y-2.5">
         <Tile href="/planner/workout" icon={Dumbbell} title="Workout" sub={plan.activeSession ? "Session in progress" : plan.workout ? `${plan.workout.name} · ${plan.workout.status}` : "Build today's session"} />
         <Tile href="/planner/meals" icon={UtensilsCrossed} title="Meals & nutrition" sub={`${plan.totals.calories} / ${plan.targets.calories} kcal · ${plan.totals.protein} / ${plan.targets.protein} g protein`} />
+        <Tile href="/planner/week" icon={CalendarRange} title="Weekly preparation" sub={weekSub} />
+        <Tile href="/planner/pantry" icon={Package} title="Pantry · what can I eat?" sub={pantryN ? `${pantryN} items on hand · suggestions from what you have` : "Add what you have, or finish a shopping list"} />
         <Tile href="/recipes" icon={ChefHat} title="Recipes" sub="Search by what's in your kitchen" />
         <Tile href="/coach" icon={MessageCircle} title="Coach" sub={ai ? "Ask anything about today" : "Rule-based answers (AI off)"} />
       </div>
+      {thisWeek && thisWeek.status !== "planning" && <WeekFeedbackCard fb={weekFeedback(thisWeek, profile.today)} />}
       {(sessions.length > 0 || prs.length > 0) && (
         <section>
           <SectionTitle

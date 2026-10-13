@@ -1,6 +1,7 @@
-import { and, desc, eq, gte, like, lte } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, lte } from "drizzle-orm";
 import { getDb } from "@/db/client";
-import { characterEvents, quests, rankHistory, scoreSnapshots, userAchievements, xpEvents, type Quest } from "@/db/schema";
+import { characterEvents, groceryWeeks, mealPrepSessions, quests, rankHistory, scoreSnapshots, userAchievements, type Quest } from "@/db/schema";
+import { pantryCount } from "./pantry";
 import { addDays, dateInTz, diffDays, endOfWeek, lastNDays, startOfWeek, hhmmToMinutes, type ISODate } from "@/lib/dates";
 import { parseJson, toJson } from "@/lib/json";
 import { ACHIEVEMENT_MAP, evaluateAchievements, type AchievementDef } from "@/ranking/achievements";
@@ -30,7 +31,7 @@ import {
   loadWorkouts,
 } from "./loaders";
 import { getProfile, updateProfile, type ProfileView } from "./profile";
-import { awardXp, totalXp } from "./xp";
+import { awardXp, totalXp, voidXpForSource, liveEventsWithPrefix } from "./xp";
 import { recordEvent } from "./events";
 import { strengthProgress, recentSessions, getPlanForDate } from "./workouts";
 import { nutritionConsistency, resolveTargets, dayTotals } from "./nutrition";
@@ -316,7 +317,7 @@ export function buildContext(profile: ProfileView, input: EngineInput, assessmen
     training: (() => {
       const sessions = recentSessions(400, today);
       // A "PR" for achievements means an improvement over a previous record (baselines don't count).
-      const prs = getDb().select({ key: xpEvents.key }).from(xpEvents).where(like(xpEvents.key, "personal_record:%")).all();
+      const prs = liveEventsWithPrefix("personal_record:");
       const plan = getPlanForDate(today);
       return { sessions: sessions.length, prs: prs.length, planToday: !!plan, planCompletedToday: plan?.status === "completed" };
     })(),
@@ -325,6 +326,24 @@ export function buildContext(profile: ProfileView, input: EngineInput, assessmen
       const c = nutritionConsistency(today, 30, t.protein, SAFE_MIN_CALORIES(profile.sex));
       const todayT = dayTotals(today);
       return { loggedDays30: c.loggedDays, proteinDays30: c.proteinDays, proteinToday: todayT.protein, proteinTarget: t.protein, caloriesToday: todayT.calories, calorieTarget: t.calories, unsafeTargets: t.unsafe };
+    })(),
+    food: (() => {
+      const db = getDb();
+      // The week that "this week's" planning quest refers to: when planning ahead on Sat/Sun, the upcoming week also counts.
+      const candidates = [weekStart, addDays(weekStart, 7)];
+      const rows = db.select().from(groceryWeeks).where(inArray(groceryWeeks.weekStart, candidates)).all();
+      const wk = rows.find((r) => r.weekStart === weekStart && r.status !== "planning") ?? rows.find((r) => r.status !== "planning") ?? rows[0];
+      const prep = wk ? db.select().from(mealPrepSessions).where(and(eq(mealPrepSessions.weekId, wk.id), eq(mealPrepSessions.status, "completed"))).get() : null;
+      const all = db.select().from(groceryWeeks).all();
+      return {
+        weekPlanned: !!wk && wk.status !== "planning",
+        shopped: !!wk && (wk.status === "shopped" || wk.status === "reviewed"),
+        shoppedWithinBudget: wk && wk.actualCost != null && (wk.status === "shopped" || wk.status === "reviewed") ? wk.actualCost <= wk.budget * 1.05 : null,
+        prepCompleted: !!prep,
+        weeksPlanned: all.filter((w) => w.status !== "planning").length,
+        pantryItems: pantryCount(),
+        leftoverReviews: all.filter((w) => w.reviewedAt).length,
+      };
     })(),
   };
 }
@@ -372,6 +391,7 @@ export function reconcile(): ReconcileResult {
           suffix: `${t.trackerId}:${runKey}:${m.days}`,
           amount: m.xp,
           description: `${t.name}: ${m.label} milestone`,
+          source: { type: "sobriety", id: `${t.trackerId}:${runKey}:${m.days}` },
         });
         recordEvent({
           type: "milestone",
@@ -387,11 +407,29 @@ export function reconcile(): ReconcileResult {
   // 2. Quests: ensure instances exist for current periods, update progress, complete.
   const completedQuests = ensureAndUpdateQuests(context, today);
 
-  // 3. Achievements
+  // 3. Achievements — revoke recent ones whose condition no longer holds (their source was deleted), then evaluate new.
+  const cutoff = new Date(Date.now() - 48 * 3600_000).toISOString();
+  for (const ua of db.select().from(userAchievements).where(gte(userAchievements.unlockedAt, cutoff)).all()) {
+    const def = ACHIEVEMENT_MAP.get(ua.key);
+    if (!def) continue;
+    let holds = true;
+    try {
+      holds = def.check(context);
+    } catch {
+      holds = true;
+    }
+    if (!holds) {
+      voidXpForSource({ type: "achievement", id: ua.key }, "achievement condition no longer met");
+      db.delete(userAchievements).where(eq(userAchievements.id, ua.id)).run();
+      db.delete(characterEvents).where(eq(characterEvents.key, `ach:${ua.key}`)).run();
+      if (def.title && profile.equippedTitle === def.title) updateProfile({ equippedTitle: null });
+      context.unlocked.delete(ua.key);
+    }
+  }
   const newAchievements = evaluateAchievements(context);
   for (const a of newAchievements) {
     db.insert(userAchievements).values({ key: a.key }).onConflictDoNothing().run();
-    if (a.xp > 0) awardXp("achievement", today, { suffix: a.key, amount: a.xp, description: `Achievement: ${a.name}` });
+    if (a.xp > 0) awardXp("achievement", today, { suffix: a.key, amount: a.xp, description: `Achievement: ${a.name}`, source: { type: "achievement", id: a.key } });
     recordEvent({ type: "achievement", key: `ach:${a.key}`, title: a.name, description: a.description + (a.title ? ` Title unlocked: “${a.title}”.` : ""), domain: a.domain === "system" || a.domain === "overall" ? null : a.domain });
     if (a.title && !profile.equippedTitle) updateProfile({ equippedTitle: a.title });
     pushNotification(profile.preferences.notifications, { kind: "achievement", title: `Achievement unlocked: ${a.name}`, body: a.title ? `New title available: “${a.title}”` : a.description, href: "/profile#achievements", key: `n:ach:${a.key}` });
@@ -515,8 +553,14 @@ function ensureAndUpdateQuests(ctx: ProgressionContext, today: ISODate): Quest[]
     }
     const nowDone = progress >= q.target;
     if (q.completedAt) {
-      // Keep progress display at least at target for completed quests
-      db.update(quests).set({ progress: Math.max(progress, q.target) }).where(eq(quests.id, q.id)).run();
+      if (nowDone) {
+        db.update(quests).set({ progress }).where(eq(quests.id, q.id)).run();
+      } else {
+        // The source of the progress was deleted/corrected (e.g. a discarded workout): un-complete and void the XP.
+        voidXpForSource({ type: "quest", id: q.id }, "quest progress reverted");
+        db.update(quests).set({ progress, completedAt: null }).where(eq(quests.id, q.id)).run();
+        db.delete(characterEvents).where(eq(characterEvents.key, `quest:${q.id}`)).run();
+      }
       continue;
     }
     db.update(quests)
@@ -525,7 +569,7 @@ function ensureAndUpdateQuests(ctx: ProgressionContext, today: ISODate): Quest[]
       .run();
     if (nowDone) {
       const rule = q.kind === "daily" ? "quest_daily" : q.kind === "weekly" ? "quest_weekly" : "quest_long";
-      awardXp(rule, today, { suffix: q.id, amount: q.rewardXp, description: `Quest: ${q.title}` });
+      awardXp(rule, today, { suffix: q.id, amount: q.rewardXp, description: `Quest: ${q.title}`, source: { type: "quest", id: q.id } });
       if (q.kind !== "daily") {
         recordEvent({ type: "milestone", key: `quest:${q.id}`, title: `Quest complete: ${q.title}`, description: `+${q.rewardXp} XP`, domain: q.domain === "overall" ? null : (q.domain as DomainId) });
       }

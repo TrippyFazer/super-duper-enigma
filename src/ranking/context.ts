@@ -81,4 +81,6 @@ export interface ProgressionContext {
   special: { completed: number; accepted: number; offeredToday: number };
   training: { sessions: number; prs: number; planToday: boolean; planCompletedToday: boolean };
   nutrition: { loggedDays30: number; proteinDays30: number; proteinToday: number; proteinTarget: number; caloriesToday: number; calorieTarget: number; unsafeTargets: boolean };
+  /** Weekly food planning state for the week containing `today` (and the upcoming one when planning ahead). */
+  food: { weekPlanned: boolean; shopped: boolean; shoppedWithinBudget: boolean | null; prepCompleted: boolean; weeksPlanned: number; pantryItems: number; leftoverReviews: number };
 }

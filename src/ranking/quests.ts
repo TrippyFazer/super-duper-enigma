@@ -173,6 +173,33 @@ export const QUEST_TEMPLATES: QuestTemplate[] = [
     priority: () => 65,
   },
   {
+    key: "weekly.plan_meals",
+    kind: "weekly",
+    domain: "cooking",
+    applies: (c) => has(c, "cooking"),
+    build: () => ({ title: "Plan your meals for the week", description: "Budget, meals, shopping list. Sunday is the first quest of the week.", target: 1, rewardXp: 50 }),
+    progress: (c) => (c.food.weekPlanned ? 1 : 0),
+    priority: (c) => (c.food.weekPlanned ? 20 : 72),
+  },
+  {
+    key: "weekly.budget_shop",
+    kind: "weekly",
+    domain: "cooking",
+    applies: (c) => has(c, "cooking") && c.food.weekPlanned,
+    build: () => ({ title: "Grocery shop within your planned budget", description: "Enter what you actually paid. Within 5% counts — this rewards planning, not skimping.", target: 1, rewardXp: 40 }),
+    progress: (c) => (c.food.shoppedWithinBudget ? 1 : 0),
+    priority: () => 66,
+  },
+  {
+    key: "weekly.meal_prep",
+    kind: "weekly",
+    domain: "cooking",
+    applies: (c) => has(c, "cooking") && c.food.weekPlanned,
+    build: () => ({ title: "Complete your meal prep", description: "One session that makes the whole week easier.", target: 1, rewardXp: 60 }),
+    progress: (c) => (c.food.prepCompleted ? 1 : 0),
+    priority: () => 64,
+  },
+  {
     key: "weekly.finance",
     kind: "weekly",
     domain: "wealth",
@@ -277,5 +304,5 @@ export function selectQuestTemplates(ctx: ProgressionContext): { daily: QuestTem
     QUEST_TEMPLATES.filter((q) => q.kind === kind && q.applies(ctx))
       .sort((a, b) => b.priority(ctx) - a.priority(ctx))
       .slice(0, max);
-  return { daily: pick("daily", 4), weekly: pick("weekly", 3), long: pick("long", 3) };
+  return { daily: pick("daily", 4), weekly: pick("weekly", 5), long: pick("long", 3) };
 }

@@ -70,6 +70,9 @@ export function toView(row: Profile): ProfileView {
   };
 }
 
+/** Nested partial so callers can patch a single preference field. */
+export type PreferencesPatch = { [K in keyof Preferences]?: Preferences[K] extends object ? Partial<Preferences[K]> : Preferences[K] };
+
 export interface ProfileUpdate {
   name?: string;
   equippedTitle?: string | null;
@@ -81,7 +84,7 @@ export interface ProfileUpdate {
   activeDomains?: DomainId[];
   targets?: Partial<Targets>;
   baseline?: Partial<Baseline>;
-  preferences?: Partial<Preferences>;
+  preferences?: PreferencesPatch;
   goals?: string | null;
   onboardingCompletedAt?: string | null;
 }
@@ -111,6 +114,9 @@ export function updateProfile(patch: ProfileUpdate): ProfileView {
       fitness: { ...current.preferences.fitness, ...(patch.preferences.fitness ?? {}) },
       nutrition: { ...current.preferences.nutrition, ...(patch.preferences.nutrition ?? {}) },
       notifications: { ...current.preferences.notifications, ...(patch.preferences.notifications ?? {}) },
+      sleep: { ...current.preferences.sleep, ...(patch.preferences.sleep ?? {}) },
+      motivation: { ...current.preferences.motivation, ...(patch.preferences.motivation ?? {}) },
+      food: { ...current.preferences.food, ...(patch.preferences.food ?? {}) },
       ai: { ...current.preferences.ai, ...(patch.preferences.ai ?? {}) },
     });
     values.preferences = toJson(merged);

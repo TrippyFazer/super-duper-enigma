@@ -17,7 +17,7 @@ import {
 import { hhmmToMinutes, type ISODate } from "@/lib/dates";
 import { toJson } from "@/lib/json";
 import { getProfile } from "./profile";
-import { awardXp, type XpAward } from "./xp";
+import { awardXp, voidXpForSource, voidXpByKey, type XpAward } from "./xp";
 
 export interface MutationResult {
   ok: true;
@@ -33,15 +33,27 @@ const awards = (...xs: XpAward[]) => xs.filter((x) => x.awarded);
 export function logWorkout(input: { date: ISODate; type: string; durationMin: number; intensity: number; notes?: string | null }): MutationResult {
   const db = getDb();
   const r = db.insert(workouts).values({ ...input, source: "manual" }).returning({ id: workouts.id }).get();
+  const src = { type: "workout" as const, id: r.id };
   const xp = awards(
-    awardXp("workout", input.date, { suffix: r.id }),
-    ...(input.durationMin >= 45 ? [awardXp("workout_long", input.date)] : []),
+    awardXp("workout", input.date, { suffix: r.id, source: src }),
+    ...(input.durationMin >= 45 ? [awardXp("workout_long", input.date, { source: src })] : []),
   );
   return { ok: true, xp, id: r.id };
 }
 
-export function deleteWorkout(id: number) {
-  getDb().delete(workouts).where(eq(workouts.id, id)).run();
+/** Deletes a logged workout and voids the XP it earned. Returns the voided amount. */
+export function deleteWorkout(id: number): number {
+  const db = getDb();
+  const voided = voidXpForSource({ type: "workout", id }, "workout deleted");
+  db.delete(workouts).where(eq(workouts.id, id)).run();
+  return voided;
+}
+
+export function updateWorkout(id: number, patch: { date?: ISODate; type?: string; durationMin?: number; intensity?: number; notes?: string | null }) {
+  const db = getDb();
+  db.update(workouts).set(patch).where(eq(workouts.id, id)).run();
+  const w = db.select().from(workouts).where(eq(workouts.id, id)).get();
+  if (w && w.durationMin < 45) voidXpByKey(`workout_long:${w.date}`, "workout shortened below 45 min");
 }
 
 export function logSteps(input: { date: ISODate; steps: number; activeMinutes?: number | null }): MutationResult {
@@ -51,7 +63,8 @@ export function logSteps(input: { date: ISODate; steps: number; activeMinutes?: 
     .values({ date: input.date, steps: input.steps, activeMinutes: input.activeMinutes ?? null, source: "manual" })
     .onConflictDoUpdate({ target: dailyActivity.date, set: { steps: input.steps, activeMinutes: input.activeMinutes ?? null } })
     .run();
-  const xp = input.steps >= profile.targets.stepsTarget ? awards(awardXp("steps_target", input.date)) : [];
+  const xp = input.steps >= profile.targets.stepsTarget ? awards(awardXp("steps_target", input.date, { source: { type: "steps", id: input.date } })) : [];
+  if (input.steps < profile.targets.stepsTarget) voidXpByKey(`steps_target:${input.date}`, "steps corrected below target");
   return { ok: true, xp };
 }
 
@@ -95,12 +108,24 @@ export function logSleep(input: {
     })
     .run();
 
+  const src = { type: "sleep" as const, id: input.date };
+  const hitTarget = input.totalSleepMin >= profile.targets.sleepTargetMin;
+  const hitBed = !!(bedtimeStart && profile.targets.bedtimeTarget && inBedByTarget(input.bedtime!, profile.targets.bedtimeTarget));
+  if (!hitTarget) voidXpByKey(`sleep_target:${input.date}`, "sleep entry corrected");
+  if (!hitBed) voidXpByKey(`bedtime_target:${input.date}`, "sleep entry corrected");
   const xp = awards(
-    awardXp("sleep_logged", input.date),
-    ...(input.totalSleepMin >= profile.targets.sleepTargetMin ? [awardXp("sleep_target", input.date)] : []),
-    ...(bedtimeStart && profile.targets.bedtimeTarget && inBedByTarget(input.bedtime!, profile.targets.bedtimeTarget) ? [awardXp("bedtime_target", input.date)] : []),
+    awardXp("sleep_logged", input.date, { source: src }),
+    ...(hitTarget ? [awardXp("sleep_target", input.date, { source: src })] : []),
+    ...(hitBed ? [awardXp("bedtime_target", input.date, { source: src })] : []),
   );
   return { ok: true, xp };
+}
+
+/** Deletes a sleep entry and voids its XP. */
+export function deleteSleep(date: ISODate): number {
+  const voided = voidXpForSource({ type: "sleep", id: date }, "sleep entry deleted");
+  getDb().delete(sleepEntries).where(eq(sleepEntries.date, date)).run();
+  return voided;
 }
 
 function shiftDate(d: ISODate, n: number): ISODate {
@@ -140,12 +165,16 @@ export function logMeal(input: { date: ISODate; mealType: string; name: string; 
     })
     .returning({ id: meals.id })
     .get();
-  const xp = awards(awardXp("meal_cooked", input.date, { suffix: r.id }), ...(isNew ? [awardXp("new_recipe", input.date)] : []));
+  const src = { type: "meal" as const, id: r.id };
+  const xp = awards(awardXp("meal_cooked", input.date, { suffix: r.id, source: src }), ...(isNew ? [awardXp("new_recipe", input.date, { source: src })] : []));
   return { ok: true, xp, id: r.id };
 }
 
-export function deleteMeal(id: number) {
+/** Deletes a cooked-meal log and voids its XP. */
+export function deleteMeal(id: number): number {
+  const voided = voidXpForSource({ type: "meal", id }, "meal deleted");
   getDb().delete(meals).where(eq(meals.id, id)).run();
+  return voided;
 }
 
 export function toggleRecipeFlag(id: number, field: "isFavorite" | "isSaved", value: boolean) {
@@ -225,12 +254,16 @@ export function completeRoutine(input: { routineId: number; date: ISODate; steps
       set: { stepsCompleted: toJson(input.stepsCompleted ?? []), complete },
     })
     .run();
-  const xp = complete ? awards(awardXp("routine_complete", input.date, { suffix: input.routineId })) : [];
+  const xp = complete ? awards(awardXp("routine_complete", input.date, { suffix: input.routineId, source: { type: "routine", id: `${input.routineId}:${input.date}` } })) : [];
+  if (!complete) voidXpForSource({ type: "routine", id: `${input.routineId}:${input.date}` }, "routine un-completed");
   return { ok: true, xp };
 }
 
-export function uncompleteRoutine(routineId: number, date: ISODate) {
+/** Undo a routine completion (accidental tap). Voids its XP. */
+export function uncompleteRoutine(routineId: number, date: ISODate): number {
+  const voided = voidXpForSource({ type: "routine", id: `${routineId}:${date}` }, "routine un-completed");
   getDb().delete(routineCompletions).where(and(eq(routineCompletions.routineId, routineId), eq(routineCompletions.date, date))).run();
+  return voided;
 }
 
 // ---------------------------------------------------------------------------
@@ -271,12 +304,15 @@ export function deleteHabit(id: number) {
 
 export function completeHabit(input: { habitId: number; date: ISODate }): MutationResult {
   getDb().insert(habitCompletions).values(input).onConflictDoNothing().run();
-  const xp = awards(awardXp("habit_complete", input.date, { suffix: input.habitId }));
+  const xp = awards(awardXp("habit_complete", input.date, { suffix: input.habitId, source: { type: "habit", id: `${input.habitId}:${input.date}` } }));
   return { ok: true, xp };
 }
 
-export function uncompleteHabit(habitId: number, date: ISODate) {
+/** Undo an accidental habit check. Voids its XP. */
+export function uncompleteHabit(habitId: number, date: ISODate): number {
+  const voided = voidXpForSource({ type: "habit", id: `${habitId}:${date}` }, "habit un-checked");
   getDb().delete(habitCompletions).where(and(eq(habitCompletions.habitId, habitId), eq(habitCompletions.date, date))).run();
+  return voided;
 }
 
 // ---------------------------------------------------------------------------
@@ -337,10 +373,12 @@ export function addFinancialSnapshot(input: {
     .values({ ...input, investsMonthly: input.investsMonthly ?? false })
     .returning({ id: financialSnapshots.id })
     .get();
-  const xp = awards(awardXp("finance_snapshot", input.date));
+  const xp = awards(awardXp("finance_snapshot", input.date, { source: { type: "finance", id: r.id } }));
   return { ok: true, xp, id: r.id };
 }
 
-export function deleteFinancialSnapshot(id: number) {
+export function deleteFinancialSnapshot(id: number): number {
+  const voided = voidXpForSource({ type: "finance", id }, "financial check-in deleted");
   getDb().delete(financialSnapshots).where(eq(financialSnapshots.id, id)).run();
+  return voided;
 }

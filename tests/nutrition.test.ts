@@ -147,10 +147,10 @@ describe("meal plans", () => {
     const r2 = await getOrGenerateMeals();
     expect(r2.plan!.id).toBe(r1.plan!.id);
     const today = getProfile().today;
-    const meal = r1.plan!.mealsParsed[0];
+    const meal = r1.plan!.meals[0];
     expect(n.plannedMealEaten(today, meal.index)).toBe(false);
     const before = totalXp();
-    const log = n.logNutrition({ date: today, mealType: meal.mealType, name: meal.name, calories: meal.calories, protein: meal.protein, carbs: meal.carbs, fat: meal.fat, source: "plan", planMealIndex: meal.index, recipeId: meal.recipeId ?? null }, { proteinTarget: 999, calorieTarget: 2400, unsafeTargets: false });
+    const log = n.logNutrition({ date: today, mealType: meal.mealType, name: meal.name, calories: meal.calories, protein: meal.protein, carbs: meal.carbs, fat: meal.fat, source: "plan", plannedMealId: meal.id, recipeId: meal.recipeId ?? null }, { proteinTarget: 999, calorieTarget: 2400, unsafeTargets: false });
     expect(log.xp.some((x) => x.key.startsWith("planned_meal:"))).toBe(true);
     expect(totalXp()).toBe(before + 10);
     expect(n.plannedMealEaten(today, meal.index)).toBe(true);
@@ -158,7 +158,7 @@ describe("meal plans", () => {
     expect(r3.generated).toBe(true);
     // One plan row per day (upsert), so the id is stable but the content is regenerated.
     expect(n.getMealPlan(today)!.id).toBe(r3.plan!.id);
-    expect(r3.plan!.mealsParsed.length).toBeGreaterThanOrEqual(2);
+    expect(r3.plan!.meals.filter((m) => m.status === "planned").length).toBeGreaterThanOrEqual(2);
   });
 
   it("cooking rank sees nutrition substats once enough days are logged", () => {

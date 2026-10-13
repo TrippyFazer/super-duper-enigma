@@ -12,7 +12,11 @@ import { QUEST_LIBRARY } from "@/ranking/questLibrary";
 import { getProvider } from "./config";
 import type { AiContext } from "./context";
 import type { AiProvider } from "./provider";
-import { CoachReplySchema, MealPlanSchema, QuestCandidateSchema, WorkoutPlanSchema, type AiCoachReply } from "./schemas";
+import { CoachReplySchema, DayAdjustSchema, FoodEstimateSchema, MealPlanSchema, QuestCandidateSchema, RecipeSuggestionSchema, WeeklyPlanSchema, WorkoutPlanSchema, type AiCoachReply, type AiFoodEstimate } from "./schemas";
+import { generateTemplateWeek, shoppingListFromMeals, buildPrepPlan, type GeneratedWeek, type GenerateWeekInput, type WeekMeal } from "@/planner/weekTemplates";
+import { suggestFromPantryTemplate, type SuggestInput, type Suggestion } from "@/planner/pantrySuggest";
+import { canonicalName, findIngredient } from "@/food/ingredients";
+import { proposeDayAdjustment, type AdjustProposal, type RemainingSlot } from "@/planner/dayAdjust";
 
 /**
  * Generation entry points. Each one:
@@ -220,3 +224,173 @@ export function rulesCoach(ctx: AiContext, question: string, extras: { openQuest
 }
 
 export const PLACEHOLDER_LIBRARY_CANDIDATE = libraryCandidate;
+
+// ------------------------------------------------------- food estimate ----
+/**
+ * Estimate nutrition for a described meal. Only used when no verified data
+ * matched; the result is always shown as an ESTIMATE and is editable.
+ * Returns null when AI is not configured (the UI then offers quick-add).
+ */
+export async function estimateFood(description: string): Promise<(AiFoodEstimate & { source: "ai" }) | null> {
+  const provider = getProvider();
+  if (!provider) return null;
+  const key = `food:${hash(description.trim().toLowerCase())}`;
+  const cached = readCache<AiFoodEstimate>("food", key);
+  if (cached) return { ...cached, source: "ai" };
+  const out = await provider.generateJSON(
+    {
+      system: SYSTEM_BASE + " You estimate restaurant/home meal nutrition from a short description. Use typical restaurant portion sizes. Be honest about uncertainty.",
+      user: `Describe: ${description}\nReturn JSON {name, calories, protein, carbs, fat, confidence (low|medium|high), assumptions}. Integers. Name ≤ 60 chars.`,
+      maxTokens: 250,
+      temperature: 0.2,
+    },
+    FoodEstimateSchema,
+  );
+  writeCache("food", key, new Date().toISOString().slice(0, 10), out, provider);
+  return { ...out, source: "ai" };
+}
+
+// ---------------------------------------------------------- day adjust ----
+/** Propose replacements for the rest of today. AI when available, otherwise a recipe/pantry template. Never applied without approval. */
+export async function adjustDay(ctx: AiContext, input: { remaining: RemainingSlot[]; remainingCalories: number; remainingProtein: number; recipes: RecipeLite[]; pantry: string[]; maxPrepMin: number; dislikes: string[]; unplanned: string }): Promise<(AdjustProposal & { source: "ai" | "template" }) | null> {
+  const fallback = () => {
+    const p = proposeDayAdjustment(input);
+    return p ? { ...p, source: "template" as const } : null;
+  };
+  const provider = getProvider();
+  if (!provider || !input.remaining.length) return fallback();
+  try {
+    const out = await provider.generateJSON(
+      {
+        system: SYSTEM_BASE + " You rebalance the rest of today's meals after an unplanned meal. Never recommend skipping meals or eating under 300 kcal for a main meal. Prefer ingredients on hand.",
+        user: [
+          `Unplanned meal eaten: ${input.unplanned}. Remaining calories for today: ${input.remainingCalories} kcal, protein still needed: ${input.remainingProtein} g.`,
+          `Remaining planned slots: ${JSON.stringify(input.remaining.map((r) => ({ slot: r.slot, mealType: r.mealType, planned: r.name, calories: r.calories })))}.`,
+          `On hand: ${input.pantry.join(", ") || "unknown"}. Max prep ${input.maxPrepMin} min. Dislikes: ${input.dislikes.join(", ") || "none"}.`,
+          `Saved recipes: ${input.recipes.slice(0, 25).map((r) => `${r.name} (${r.calories} kcal, ${r.proteinG} g)`).join("; ")}.`,
+          "Return JSON {meals[{replacesSlot, name, calories, protein, carbs, fat, ingredients[], notes}], rationale}. One replacement per remaining slot, in slot order.",
+        ].join("\n"),
+        maxTokens: 700,
+      },
+      DayAdjustSchema,
+    );
+    const meals = out.meals
+      .map((m) => {
+        const slot = input.remaining.find((r) => r.slot === m.replacesSlot);
+        if (!slot || violatesSafety(`${m.name} ${m.notes}`)) return null;
+        const match = input.recipes.find((r) => r.name.toLowerCase() === m.name.toLowerCase());
+        return { replacesId: slot.id, replacesSlot: slot.slot, mealType: slot.mealType, name: m.name, calories: m.calories, protein: m.protein, carbs: m.carbs, fat: m.fat, ingredients: m.ingredients, recipeId: match?.id ?? null, notes: m.notes };
+      })
+      .filter((x): x is NonNullable<typeof x> => !!x);
+    if (!meals.length) return fallback();
+    return { meals, rationale: out.rationale, source: "ai" };
+  } catch {
+    return fallback();
+  }
+}
+
+// ---------------------------------------------------------------- week ----
+/**
+ * A full week: meals, consolidated shopping list, prep plan. AI gets the
+ * structured context (inventory, targets, budget, preferences) and must return
+ * the WeeklyPlanSchema; prices come from the catalog whenever it knows the
+ * ingredient (AI prices only fill gaps). Falls back to the template planner.
+ */
+export async function generateWeek(ctx: AiContext, input: GenerateWeekInput & { force?: boolean }): Promise<GenResult<GeneratedWeek>> {
+  const key = `week:${input.weekStart}:${hash({ b: input.budget, m: input.budgetMode, n: input.mealsNeeded, w: input.week, p: input.prefs, c: input.calorieTarget, pr: input.proteinTarget, pantry: input.pantry.map((p) => p.name).sort() })}`;
+  if (!input.force) {
+    const cached = readCache<{ plan: GeneratedWeek; source: "ai" | "template" }>("week", key);
+    if (cached) return { ...cached, cached: true };
+  }
+  const provider = getProvider();
+  if (provider) {
+    try {
+      const out = await provider.generateJSON(
+        {
+          system: SYSTEM_BASE + " You plan one week of meals for a home cook on a grocery budget. Optimise for ingredient reuse (few core ingredients used across many meals), low waste, convenience (quick weekday meals, batch prep), hitting calorie/protein targets, and staying within budget. Use the pantry first. Prices are rough US supermarket estimates.",
+          user: [
+            `Week starting ${input.weekStart}. Budget $${input.budget} (${input.budgetMode}). Targets ${input.calorieTarget} kcal and ${input.proteinTarget} g protein per day.`,
+            `Meals needed: ${JSON.stringify(input.mealsNeeded)} (eatingOut = dinners NOT to plan, put them on Friday/Saturday). Preferences: ${JSON.stringify(input.week)}. Diet: ${input.prefs.dietPrefs.join(", ") || "none"}. Dislikes: ${input.prefs.dislikes.join(", ") || "none"}. Likes: ${input.prefs.likes.join(", ") || "none"}. Max prep ${input.prefs.maxPrepMin} min on weekdays.`,
+            `Pantry on hand (do not buy these unless more is needed): ${input.pantry.map((p) => `${p.name}${p.servings != null ? ` (~${p.servings} servings)` : ""}`).join(", ") || "nothing recorded"}.`,
+            `Saved recipes you may reuse by exact name: ${input.recipes.slice(0, 40).map((r) => `${r.name} [${r.mealType}, ${r.calories} kcal, ${r.proteinG} g, ${r.ingredients.join("/")}]`).join("; ")}.`,
+            "Return JSON {rationale, days[{date, meals[{mealType, name, calories, protein, carbs, fat, ingredients[{name, qty, unit}], prepMinutes, prepAhead}]}], shoppingList[{name, category, qty, unit, estPrice, usedIn[]}], prepPlan[{name, servings, minutes, supports[]}]}. Keep to ~10-14 distinct ingredients beyond staples. Leftover lunches should be named 'Leftover <dinner>'.",
+            `Context: ${JSON.stringify({ nutrition: ctx.nutrition, profile: ctx.profile })}`,
+          ].join("\n"),
+          maxTokens: 3500,
+        },
+        WeeklyPlanSchema,
+      );
+      const meals: WeekMeal[] = [];
+      for (const day of out.days) {
+        if (day.date < input.weekStart || day.date > addDaysIso(input.weekStart, 6)) continue;
+        for (const m of day.meals) {
+          if (violatesSafety(`${m.name}`)) continue;
+          const match = input.recipes.find((r) => r.name.toLowerCase() === m.name.toLowerCase().replace(/^leftover /, ""));
+          meals.push({ date: day.date, mealType: m.mealType, name: m.name, calories: m.calories, protein: m.protein, carbs: m.carbs, fat: m.fat, ingredients: m.ingredients.map((i) => i.name), recipeId: match?.id ?? null, prepMinutes: m.prepMinutes, leftover: /^leftover /i.test(m.name) });
+        }
+      }
+      const dinners = meals.filter((m) => m.mealType === "dinner").length;
+      if (meals.length < 7 || dinners < Math.min(3, input.mealsNeeded.dinner)) throw new Error("AI week too thin");
+      const pantry = new Map(input.pantry.map((p) => [canonicalName(p.name), p.servings ?? 2]));
+      const list = shoppingListFromMeals(meals, pantry, input);
+      // Fill prices the catalog doesn't know from the AI's estimate.
+      for (const item of list.items) {
+        if (item.estPrice == null) {
+          const ai = out.shoppingList.find((x) => canonicalName(x.name) === item.name);
+          if (ai?.estPrice != null) item.estPrice = ai.estPrice;
+        }
+      }
+      const total = Math.round(list.items.reduce((a, i) => a + (i.estPrice ?? 0), 0) * 100) / 100;
+      const prep = out.prepPlan.length ? { items: out.prepPlan.map((p) => ({ name: p.name, servings: p.servings, minutes: p.minutes, supports: p.supports })), minutes: Math.round(Math.max(...out.prepPlan.map((p) => p.minutes)) + out.prepPlan.reduce((a, p) => a + p.minutes, 0) * 0.3) } : buildPrepPlan(meals.filter((m) => !m.leftover && m.mealType !== "snack"));
+      const plan: GeneratedWeek = { weekStart: input.weekStart, meals, shoppingList: list.items, prepPlan: prep.items, prepMinutes: prep.minutes, estimatedCost: total, reusePct: list.reusePct, staplesAssumed: list.staples, rationale: out.rationale || "Planned for reuse and budget.", distinctRecipes: new Set(meals.filter((m) => !m.leftover && m.mealType !== "snack").map((m) => m.name)).size };
+      writeCache("week", key, input.weekStart, { plan, source: "ai" }, provider);
+      return { plan, source: "ai", cached: false };
+    } catch (e) {
+      const plan = generateTemplateWeek(input);
+      writeCache("week", key, input.weekStart, { plan, source: "template" });
+      return { plan, source: "template", cached: false, error: (e as Error).message };
+    }
+  }
+  const plan = generateTemplateWeek(input);
+  writeCache("week", key, input.weekStart, { plan, source: "template" });
+  return { plan, source: "template", cached: false };
+}
+
+function addDaysIso(d: string, n: number): string {
+  const t = new Date(d + "T00:00:00Z");
+  t.setUTCDate(t.getUTCDate() + n);
+  return t.toISOString().slice(0, 10);
+}
+
+// -------------------------------------------------------------- pantry ----
+/** "What can I eat tonight?" — structured recipes from what is on hand. */
+export async function suggestFromPantry(ctx: AiContext, input: SuggestInput & { budgetRemaining?: number | null; recentMeals?: string[] }): Promise<{ suggestions: Suggestion[]; source: "ai" | "template"; error?: string }> {
+  const provider = getProvider();
+  const fallback = () => ({ suggestions: suggestFromPantryTemplate(input), source: "template" as const });
+  if (!provider) return fallback();
+  try {
+    const out = await provider.generateJSON(
+      {
+        system: SYSTEM_BASE + " You suggest 2-4 realistic meals from what the user already has. Prefer using ingredients that are expiring. At most 2 additional ingredients per suggestion. Include short steps.",
+        user: [
+          `Request context: ${JSON.stringify({ availableIngredients: input.pantry, expiringIngredients: input.expiring, remainingCalories: input.remainingCalories, remainingProtein: input.remainingProtein, maxPrepMinutes: input.maxMinutes, mealType: input.mealType ?? "dinner", dislikes: input.dislikes, budgetRemaining: input.budgetRemaining ?? null, recentMeals: input.recentMeals ?? [], foodPreferences: ctx.nutrition.dietPrefs })}`,
+          "Return JSON {suggestions[{name, calories, protein, carbs, fat, prepMinutes, uses[], additional[], steps[], why}]}.",
+        ].join("\n"),
+        maxTokens: 1200,
+      },
+      RecipeSuggestionSchema,
+    );
+    const pantry = new Set(input.pantry.map(canonicalName));
+    const suggestions: Suggestion[] = out.suggestions
+      .filter((s) => !violatesSafety(`${s.name} ${s.why}`))
+      .map((s) => {
+        const uses = s.uses.filter((u) => pantry.has(canonicalName(u)));
+        const core = [...s.uses, ...s.additional].filter((i) => !findIngredient(i)?.staple);
+        return { ...s, uses, recipeId: input.recipes.find((r) => r.name.toLowerCase() === s.name.toLowerCase())?.id ?? null, coverage: core.length ? Math.round((uses.length / core.length) * 100) / 100 : 0 };
+      });
+    if (!suggestions.length) return fallback();
+    return { suggestions, source: "ai" };
+  } catch (e) {
+    return { ...fallback(), error: (e as Error).message };
+  }
+}

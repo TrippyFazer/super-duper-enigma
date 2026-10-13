@@ -5,7 +5,9 @@ import { addDays, lastNDays } from "@/lib/dates";
 import type { GenerateInput } from "@/planner/workoutTemplates";
 import { loadRecipes, loadSleep, loadWorkouts } from "./loaders";
 import { seedRecipes } from "@/db/seed";
-import { getMealPlan, recentRecipeIds, resolveTargets, saveMealPlan, dayTotals, plannedMealEaten } from "./nutrition";
+import { adjustDay } from "@/ai/generate";
+import { pantryNames } from "./pantry";
+import { getMealPlan, recentRecipeIds, resolveTargets, saveMealPlan, dayTotals } from "./nutrition";
 import { getProfile, type ProfileView } from "./profile";
 import { buildContext, buildEngineInput, getAssessment, getQuests } from "./progression";
 import { maybeOffer, openOffer, signalsFromContext, listOffers } from "./questOffers";
@@ -130,9 +132,25 @@ export function todayPlanSummary(profile: ProfileView) {
   const totals = dayTotals(today);
   return {
     workout: plan ? { id: plan.id, name: plan.name, exercises: plan.exercisesParsed.length, minutes: plan.estimatedMinutes, status: plan.status, source: plan.source } : null,
-    meals: meals ? { count: meals.mealsParsed.length, eaten: meals.mealsParsed.filter((m) => plannedMealEaten(today, m.index)).length, calories: meals.mealsParsed.reduce((a, m) => a + m.calories, 0), protein: meals.mealsParsed.reduce((a, m) => a + m.protein, 0) } : null,
+    meals: meals ? { count: meals.meals.filter((m) => m.status !== "replaced").length, eaten: meals.meals.filter((m) => m.status === "eaten").length, calories: meals.meals.filter((m) => m.status !== "replaced").reduce((a, m) => a + m.calories, 0), protein: meals.meals.filter((m) => m.status !== "replaced").reduce((a, m) => a + m.protein, 0) } : null,
     totals,
     targets,
     activeSession: getActiveSession(),
   };
+}
+
+/** Build an approval-gated proposal for the rest of today after an unplanned meal. */
+export async function proposeAdjustment(unplanned: string) {
+  const profile = getProfile();
+  const today = profile.today;
+  const plan = getMealPlan(today);
+  const remaining = (plan?.meals ?? []).filter((m) => m.status === "planned" || m.status === "prepared").map((m) => ({ id: m.id, slot: m.slot, mealType: m.mealType as "breakfast" | "lunch" | "dinner" | "snack", name: m.name, calories: m.calories, protein: m.protein }));
+  if (!remaining.length) return null;
+  const targets = resolveTargets(profile.preferences.nutrition, profile);
+  const totals = dayTotals(today);
+  const assessment = getAssessment(profile);
+  const ctx = buildAiContext(profile, profile.preferences, assessment);
+  const recipes = loadRecipes().map((r) => ({ id: r.id, name: r.name, mealType: r.mealType, calories: r.calories, proteinG: r.proteinG, carbsG: r.carbsG, fatG: r.fatG, tags: r.tagsParsed, ingredients: r.ingredientsParsed, prepTimeMin: r.prepTimeMin, cookTimeMin: r.cookTimeMin, isFavorite: r.isFavorite }));
+  const proposal = await adjustDay(ctx, { remaining, remainingCalories: targets.calories - totals.calories, remainingProtein: targets.protein - totals.protein, recipes, pantry: pantryNames(), maxPrepMin: profile.preferences.nutrition.maxPrepMin, dislikes: profile.preferences.nutrition.dislikes, unplanned });
+  return proposal ? { ...proposal, remainingCalories: targets.calories - totals.calories, remainingProtein: targets.protein - totals.protein } : null;
 }

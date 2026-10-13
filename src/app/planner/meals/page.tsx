@@ -2,19 +2,19 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ChefHat, ChevronRight } from "lucide-react";
 import { getProfile } from "@/services/profile";
-import { entriesForDate, getMealPlan, plannedMealEaten, resolveTargets, sumEntries, nutritionConsistency } from "@/services/nutrition";
+import { entriesForDate, getMealPlan, resolveTargets, sumEntries, nutritionConsistency } from "@/services/nutrition";
 import { targetWarning, SAFE_MIN_CALORIES } from "@/services/preferences";
 import { isAiEnabled } from "@/ai/config";
 import { loadRecipes } from "@/services/loaders";
-import { PageHeader, SectionTitle } from "@/components/ui/primitives";
+import { PageHeader } from "@/components/ui/primitives";
 import { MacroRing } from "@/components/planner/MacroRing";
-import { MealPlanView } from "@/components/planner/MealPlanView";
-import { NutritionLog } from "@/components/planner/NutritionLog";
+import { MealsScreen } from "@/components/planner/MealsScreen";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Meals" };
 
-export default function MealsPage() {
+export default async function MealsPage({ searchParams }: { searchParams: Promise<{ log?: string }> }) {
+  const sp = await searchParams;
   const profile = getProfile();
   if (!profile.onboarded) redirect("/onboarding");
   const today = profile.today;
@@ -61,12 +61,14 @@ export default function MealsPage() {
         </p>
       </section>
 
-      <NutritionLog today={today} entries={entries.map((e) => ({ id: e.id, name: e.name, mealType: e.mealType, calories: e.calories, protein: e.protein, carbs: e.carbs, fat: e.fat, source: e.source }))} recipes={recipes} />
-
-      <section>
-        <SectionTitle>Today&apos;s meal plan</SectionTitle>
-        <MealPlanView plan={plan ? { source: plan.source, calorieTarget: plan.calorieTarget, proteinTarget: plan.proteinTarget, meals: plan.mealsParsed.map((m) => ({ ...m, eaten: plannedMealEaten(today, m.index) })) } : null} aiEnabled={isAiEnabled()} />
-      </section>
+      <MealsScreen
+        today={today}
+        openLog={sp.log === "1"}
+        entries={entries.map((e) => ({ id: e.id, name: e.name, mealType: e.mealType, calories: e.calories, protein: e.protein, carbs: e.carbs, fat: e.fat, source: e.source, isEstimate: e.isEstimate, venue: e.venue }))}
+        recipes={recipes}
+        plan={plan ? { source: plan.source, calorieTarget: plan.calorieTarget, proteinTarget: plan.proteinTarget, meals: plan.meals.map((m) => ({ id: m.id, index: m.index, mealType: m.mealType, name: m.name, calories: m.calories, protein: m.protein, carbs: m.carbs, fat: m.fat, ingredients: m.ingredientsParsed, recipeId: m.recipeId, notes: m.notes, status: m.status, source: m.source })) } : null}
+        aiEnabled={isAiEnabled()}
+      />
 
       <Link href="/recipes" className="plate press flex items-center gap-3 px-4 py-3">
         <ChefHat size={18} className="text-gold" />

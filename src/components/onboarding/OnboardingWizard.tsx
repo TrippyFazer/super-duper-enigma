@@ -15,7 +15,8 @@ const HABIT_SUGGESTIONS = ["Read 20 minutes", "Meditate", "Journal", "Stretch", 
 const AM_STEPS = ["Cleanser", "Moisturizer", "SPF"];
 const PM_STEPS = ["Cleanser", "Treatment", "Moisturizer"];
 
-type Step = "name" | "domains" | "fitness" | "training" | "sleep" | "cooking" | "nutrition" | "skincare" | "sobriety" | "habits" | "wealth" | "quests" | "done";
+type Step = "name" | "domains" | "fitness" | "training" | "sleep" | "cooking" | "nutrition" | "skincare" | "sobriety" | "habits" | "wealth" | "quests" | "why" | "done";
+const WHY_SUGGESTIONS = ["I want to feel confident.", "I want more discipline.", "I want to look better.", "I want to have more energy.", "I want to become someone I am proud of."];
 
 const EQUIPMENT = [
   ["barbell", "Barbell"],
@@ -71,6 +72,9 @@ export function OnboardingWizard() {
   const [dislikes, setDislikes] = useState<string[]>([]);
   const [customDislike, setCustomDislike] = useState("");
   const [questFreq, setQuestFreq] = useState<"low" | "normal" | "high">("normal");
+  const [wakeTarget, setWakeTarget] = useState("07:30");
+  const [reasons, setReasons] = useState<string[]>([]);
+  const [customReason, setCustomReason] = useState("");
 
   const order: Step[] = [
     "name",
@@ -81,6 +85,7 @@ export function OnboardingWizard() {
       return domains.includes(s as DomainId);
     }),
     "quests",
+    "why",
     "done",
   ];
   const [idx, setIdx] = useState(0);
@@ -129,7 +134,9 @@ export function OnboardingWizard() {
           fitness: domains.includes("fitness") ? { goal: fitGoal, experience, daysPerWeek: Number(daysPerWeek), equipment: equipment.length ? equipment : ["bodyweight"], workoutLengthMin: Number(lengthMin) } : undefined,
           nutrition: { goal: nutGoal, calorieTarget: calories ? Number(calories) : null, proteinTarget: protein ? Number(protein) : null, dietPrefs: diets, dislikes },
           questFrequency: questFreq,
+          sleep: domains.includes("sleep") ? { wakeTarget } : undefined,
         },
+        reasons,
       };
       const r = await completeOnboardingAction(input);
       if (!r.ok) {
@@ -339,9 +346,14 @@ export function OnboardingWizard() {
                   ]}
                 />
               </Field>
-              <Field label="Target bedtime">
-                <input type="time" value={bedtime} onChange={(e) => setBedtime(e.target.value)} className={inputClass} />
-              </Field>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Target wake time" hint="Bedtime and wind-down are derived from it">
+                  <input type="time" value={wakeTarget} onChange={(e) => setWakeTarget(e.target.value)} className={inputClass} />
+                </Field>
+                <Field label="Target bedtime" hint="Adjusted automatically once saved">
+                  <input type="time" value={bedtime} onChange={(e) => setBedtime(e.target.value)} className={inputClass} />
+                </Field>
+              </div>
             </div>
           </>
         )}
@@ -574,6 +586,35 @@ export function OnboardingWizard() {
           </>
         )}
 
+        {step === "why" && (
+          <>
+            <Title eyebrow="Your reason" title="Why are you doing this?" body="In your own words. Nobody else sees it. Some mornings the app will remind you of it — not with generic positivity, with your reason." />
+            <div className="space-y-3">
+              <div className="flex flex-wrap gap-2">
+                {Array.from(new Set([...WHY_SUGGESTIONS, ...reasons])).map((r) => (
+                  <Chip key={r} active={reasons.includes(r)} onClick={() => toggleIn(reasons, setReasons, r)}>
+                    {r}
+                  </Chip>
+                ))}
+              </div>
+              <div className="flex gap-2">
+                <input value={customReason} onChange={(e) => setCustomReason(e.target.value)} placeholder="I want to…" className={inputClass} maxLength={160} />
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    if (!customReason.trim()) return;
+                    setReasons((xs) => [...xs, customReason.trim()]);
+                    setCustomReason("");
+                  }}
+                >
+                  Add
+                </Button>
+              </div>
+              <p className="text-xs text-muted">Optional. You can add or change reasons any time from your Profile.</p>
+            </div>
+          </>
+        )}
+
         {step === "done" && (
           <>
             <Title eyebrow="Ready" title={`Welcome, ${name.trim() || "Adventurer"}.`} body="You start at the bottom. Everyone does. Ranks above D are proven over weeks, not claimed — log honestly and the climb takes care of itself." />
@@ -582,6 +623,7 @@ export function OnboardingWizard() {
               {domains.includes("fitness") && <Row k="Training" v={`${workouts}×/week now → ${daysPerWeek}×/week · ${fitGoal} · ${lengthMin} min`} />}
               <Row k="Nutrition" v={`${nutGoal}${calories ? ` · ${calories} kcal` : ""}${protein ? ` · ${protein} g protein` : ""}${diets.length ? ` · ${diets.join(", ")}` : ""}`} />
               <Row k="Quests" v={`${questFreq} frequency`} />
+              {reasons.length > 0 && <Row k="Why" v={reasons.join(" ")} />}
               {domains.includes("sleep") && <Row k="Sleep" v={`${sleepHours}h · bed by ${bedtime}`} />}
               {domains.includes("cooking") && <Row k="Cooking" v={`${meals} meals/week`} />}
               {domains.includes("skincare") && <Row k="Routines" v={`AM ${am.length} steps · PM ${pm.length} steps`} />}
