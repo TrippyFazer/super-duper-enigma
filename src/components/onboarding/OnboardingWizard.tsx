@@ -168,7 +168,7 @@ export function OnboardingWizard() {
           <>
             <Title eyebrow="Fitness" title="Where are you starting?" body="Honest answers set an honest baseline. Ranks above D must be earned by logging." />
             <div className="space-y-5">
-              <Field label="Workouts per week right now">
+              <Field label="Workouts per week right now" group>
                 <div className="flex gap-2">
                   {["0", "1", "2", "3", "4", "5", "6"].map((n) => (
                     <button key={n} type="button" onClick={() => setWorkouts(n)} className={cx("press flex-1 rounded-lg border py-2.5 text-sm tabular", workouts === n ? "border-gold/60 bg-gold/12 text-gold" : "border-border bg-card-2 text-text-2")}>
@@ -178,7 +178,7 @@ export function OnboardingWizard() {
                   ))}
                 </div>
               </Field>
-              <Field label="What kind of training?">
+              <Field label="What kind of training?" group>
                 <div className="flex flex-wrap gap-2">
                   {[
                     ["strength", "Strength / lifting"],
@@ -203,7 +203,7 @@ export function OnboardingWizard() {
           <>
             <Title eyebrow="Sleep" title="How do you sleep?" body="Connect your Oura Ring in settings after setup — it replaces manual logging entirely." />
             <div className="space-y-5">
-              <Field label="Average hours per night">
+              <Field label="Average hours per night" group>
                 <div className="flex gap-2">
                   {["5", "6", "6.5", "7", "7.5", "8", "9"].map((n) => (
                     <button key={n} type="button" onClick={() => setSleepHours(n)} className={cx("press flex-1 rounded-lg border py-2.5 text-sm tabular", sleepHours === n ? "border-gold/60 bg-gold/12 text-gold" : "border-border bg-card-2 text-text-2")}>
@@ -212,7 +212,7 @@ export function OnboardingWizard() {
                   ))}
                 </div>
               </Field>
-              <Field label="Consistent bedtime and wake time?">
+              <Field label="Consistent bedtime and wake time?" group>
                 <Segmented
                   value={consistent}
                   onChange={setConsistent}
@@ -232,7 +232,7 @@ export function OnboardingWizard() {
         {step === "cooking" && (
           <>
             <Title eyebrow="Cooking" title="How often do you cook?" body="Any meal you make yourself counts — eggs on toast included." />
-            <Field label="Home-cooked meals per week">
+            <Field label="Home-cooked meals per week" group>
               <div className="grid grid-cols-4 gap-2">
                 {["0", "2", "4", "6", "8", "10", "14", "18"].map((n) => (
                   <button key={n} type="button" onClick={() => setMeals(n)} className={cx("press rounded-lg border py-2.5 text-sm tabular", meals === n ? "border-gold/60 bg-gold/12 text-gold" : "border-border bg-card-2 text-text-2")}>
@@ -249,7 +249,7 @@ export function OnboardingWizard() {
           <>
             <Title eyebrow="Personal care" title="Set up your routines" body="Edit the steps to match what you actually do. Consistency beats product count." />
             <div className="space-y-5">
-              <Field label="Days per week you currently do a routine">
+              <Field label="Days per week you currently do a routine" group>
                 <div className="flex gap-2">
                   {["0", "1", "2", "3", "4", "5", "6", "7"].map((n) => (
                     <button key={n} type="button" onClick={() => setSkinDays(n)} className={cx("press flex-1 rounded-lg border py-2.5 text-sm tabular", skinDays === n ? "border-gold/60 bg-gold/12 text-gold" : "border-border bg-card-2 text-text-2")}>

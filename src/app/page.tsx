@@ -70,7 +70,7 @@ export default async function HomePage() {
   // Suggested next action: the cheapest useful thing right now.
   const suggestions = assessment.domains.map((d) => d.suggestedAction).filter((s): s is string => !!s);
   const openDaily = quests.daily.filter((q) => !q.done);
-  const suggestion = openDaily.length ? `Complete “${openDaily[0].title}” to move today's adventure along` : suggestions[0];
+  const suggestion = openDaily.length ? `${openDaily[0].title} · +${openDaily[0].rewardXp} XP` : suggestions[0];
 
   const greeting = (() => {
     const h = Number(profile.localTime.slice(0, 2));

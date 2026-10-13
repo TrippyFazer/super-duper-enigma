@@ -66,7 +66,7 @@ export function WorkoutSheet({ open, onClose, date }: { open: boolean; onClose: 
             );
           })}
         </div>
-        <Field label="Duration">
+        <Field label="Duration" group>
           <div className="flex gap-2">
             {DURATIONS.map((d) => (
               <button key={d} type="button" onClick={() => setDuration(d)} className={cx("press flex-1 rounded-lg border py-2.5 text-sm tabular", d === duration ? "border-accent/60 bg-accent/15 text-accent-2" : "border-border bg-card-2 text-text-2")}>
@@ -75,7 +75,7 @@ export function WorkoutSheet({ open, onClose, date }: { open: boolean; onClose: 
             ))}
           </div>
         </Field>
-        <Field label="Intensity">
+        <Field label="Intensity" group>
           <Segmented
             value={intensity}
             onChange={setIntensity}

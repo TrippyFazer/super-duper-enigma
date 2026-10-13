@@ -78,7 +78,7 @@ export function RecipeForm() {
           </select>
         </Field>
       </div>
-      <Field label="Tags">
+      <Field label="Tags" group>
         <div className="flex flex-wrap gap-1.5">
           {RECIPE_TAGS.map((t) => (
             <button key={t.id} type="button" onClick={() => setTags((xs) => (xs.includes(t.id) ? xs.filter((x) => x !== t.id) : [...xs, t.id]))} className={cx("press rounded-full border px-3 py-1.5 text-xs", tags.includes(t.id) ? "border-gold/60 bg-gold/12 text-gold" : "border-border bg-card text-text-2")}>

@@ -130,13 +130,15 @@ export function EmptyState({ icon, title, body, action }: { icon?: ReactNode; ti
   );
 }
 
-export function Field({ label, hint, children, className }: { label: string; hint?: string; children: ReactNode; className?: string }) {
+/** A labelled control. Use `group` when the children are a row of buttons rather than a single input. */
+export function Field({ label, hint, children, className, group }: { label: string; hint?: string; children: ReactNode; className?: string; group?: boolean }) {
+  const Tag = group ? "div" : "label";
   return (
-    <label className={cx("block", className)}>
+    <Tag className={cx("block", className)} {...(group ? { role: "group", "aria-label": label } : {})}>
       <span className="mb-1.5 block text-xs font-medium text-text-2">{label}</span>
       {children}
       {hint && <span className="mt-1 block text-[11px] text-muted">{hint}</span>}
-    </label>
+    </Tag>
   );
 }
 

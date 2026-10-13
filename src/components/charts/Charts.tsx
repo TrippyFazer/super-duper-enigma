@@ -66,33 +66,41 @@ export function BarsChart({
   );
 }
 
-/** Day-level heatmap (calendar-ish): values 0..1 per date, newest last. */
+/** Day-level heatmap, GitHub-style: one column per week, Monday at the top, newest week on the right. */
 export function DayHeatmap({ days, tone = "accent" }: { days: { date: string; value: number | null; label?: string }[]; tone?: "accent" | "gold" | "success" }) {
   const color = tone === "gold" ? "212,175,90" : tone === "success" ? "95,207,155" : "124,131,255";
-  // Pad to start on Monday for a tidy grid
   const first = days[0]?.date;
-  const pad = first ? ((new Date(first + "T00:00:00Z").getUTCDay() + 6) % 7) : 0;
+  const pad = first ? (new Date(first + "T00:00:00Z").getUTCDay() + 6) % 7 : 0;
   const cells = [...Array.from({ length: pad }, () => null), ...days];
+  const weeks: (typeof cells)[] = [];
+  for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
   return (
-    <div>
-      <div className="grid grid-cols-7 gap-1">
-        {["M", "T", "W", "T", "F", "S", "S"].map((d, i) => (
-          <div key={i} className="text-center text-[9px] text-faint">
+    <div className="flex gap-1.5">
+      <div className="grid grid-rows-7 gap-1 text-[9px] leading-none text-faint">
+        {["M", "", "W", "", "F", "", "S"].map((d, i) => (
+          <div key={i} className="flex h-full items-center">
             {d}
           </div>
         ))}
-        {cells.map((c, i) =>
-          c === null ? (
-            <div key={`p${i}`} />
-          ) : (
-            <div
-              key={c.date}
-              title={`${formatShort(c.date)}${c.label ? ` · ${c.label}` : ""}`}
-              className="aspect-square rounded-[4px] border border-white/[0.04]"
-              style={{ background: c.value == null ? "rgba(255,255,255,0.03)" : `rgba(${color},${0.15 + 0.85 * Math.max(0, Math.min(1, c.value))})` }}
-            />
-          ),
-        )}
+      </div>
+      <div className="grid flex-1 auto-cols-fr grid-flow-col gap-1">
+        {weeks.map((w, wi) => (
+          <div key={wi} className="grid grid-rows-7 gap-1">
+            {Array.from({ length: 7 }, (_, di) => {
+              const c = w[di];
+              return c == null ? (
+                <div key={di} className="aspect-square" />
+              ) : (
+                <div
+                  key={c.date}
+                  title={`${formatShort(c.date)}${c.label ? ` · ${c.label}` : ""}`}
+                  className="aspect-square rounded-[3px] border border-white/[0.04]"
+                  style={{ background: c.value == null ? "rgba(255,255,255,0.03)" : `rgba(${color},${0.15 + 0.85 * Math.max(0, Math.min(1, c.value))})` }}
+                />
+              );
+            })}
+          </div>
+        ))}
       </div>
     </div>
   );

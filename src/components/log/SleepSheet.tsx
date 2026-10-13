@@ -61,7 +61,7 @@ export function SleepSheet({ open, onClose, date, defaultBedtime }: { open: bool
             <input type="number" step="0.25" min="0" max="20" value={override} onChange={(e) => setOverride(e.target.value)} placeholder={(computed / 60).toFixed(1)} className={cx(inputClass, "mt-1 w-24 py-1.5 text-right")} />
           </label>
         </div>
-        <Field label="How did you feel?">
+        <Field label="How did you feel?" group>
           <div className="flex gap-2">
             {[1, 2, 3, 4, 5].map((q) => (
               <button key={q} type="button" onClick={() => setQuality(q)} className={cx("press flex-1 rounded-lg border py-2.5 text-sm", q === quality ? "border-accent/60 bg-accent/15 text-accent-2" : "border-border bg-card-2 text-text-2")}>

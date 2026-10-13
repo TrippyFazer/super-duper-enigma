@@ -171,7 +171,7 @@ function HabitEditor({ habit, onClose }: { habit: HabitItem | null; onClose: () 
         <Field label="Name">
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Read 20 minutes" className={inputClass} maxLength={60} autoFocus={!habit} />
         </Field>
-        <Field label="Icon (optional)">
+        <Field label="Icon (optional)" group>
           <div className="flex flex-wrap gap-1.5">
             {ICONS.map((i) => (
               <button key={i} type="button" onClick={() => setIcon(icon === i ? null : i)} className={cx("press h-9 w-9 rounded-lg border text-lg", icon === i ? "border-gold/60 bg-gold/12" : "border-border bg-card-2")}>
@@ -180,7 +180,7 @@ function HabitEditor({ habit, onClose }: { habit: HabitItem | null; onClose: () 
             ))}
           </div>
         </Field>
-        <Field label="Schedule">
+        <Field label="Schedule" group>
           <Segmented
             value={type}
             onChange={setType}

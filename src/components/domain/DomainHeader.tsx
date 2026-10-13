@@ -52,7 +52,7 @@ export function DomainHeader({ a, history }: { a: DomainAssessment; history: { d
 
       {a.next.requirements.length > 0 && (
         <Card>
-          <div className="eyebrow mb-2">{a.next.rank ? `To reach ${a.next.rank} rank` : "Holding S"}</div>
+          <div className="eyebrow mb-2">{a.next.rank ? `Path to rank ${a.next.rank}` : "Holding S"}</div>
           <ul className="space-y-1.5">
             {a.next.requirements.map((r, i) => (
               <li key={i} className="flex gap-2 text-sm text-text-2">
