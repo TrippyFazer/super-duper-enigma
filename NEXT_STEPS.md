@@ -1,5 +1,7 @@
 # Next steps
 
+Shipped in 0.4.0: UX refactor (universal + LOG, unified food logger, Home = today / Planner = future, component splits). See `docs/ux-audit.md`.
+
 Shipped in 0.3.0: Apple Health bridge + aggregation, workout/meal lifecycles, reversible XP ledger, eating-out logging, sleep planning, motivation, scheduled reminders, Sunday weekly food planning with pantry. Highest-value follow-ups now:
 
 0. **Ship the iOS shell.** `native/ios` has the HealthKit bridge; wrapping the PWA in Capacitor and adding the bridge gives background delivery and native notifications (morning motivation and wind-down can then fire with the app closed).

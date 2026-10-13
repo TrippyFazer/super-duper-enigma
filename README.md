@@ -54,6 +54,10 @@ Copy `.env.example` to `.env.local`. Everything is optional.
 | `AI_API_KEY` | API key for that provider. Optional; can also be entered in Settings → AI provider (stored only in your local database). |
 | `AI_MODEL` | Model id (defaults: `gpt-4o-mini` / `claude-haiku-5-5`) |
 | `AI_BASE_URL` | Override the API base URL, e.g. a local Ollama or Groq endpoint |
+| `APP_PASSWORD` | When set, every page needs this password (one sign-in per device, kept 400 days). Set it on any public deployment: the app has no accounts. |
+| `AUTH_SECRET` | Signs the sign-in cookie. Optional; defaults to the password, so changing the password signs everyone out. |
+| `OURA_AUTO_SYNC_HOURS` | How often the server pulls the last 3 days from Oura by itself (default `3`; `0` = off). |
+| `TZ` | Server clock zone for server-rendered times. Match the profile's time zone (set in `compose.tfhealth.yml`). |
 | `HEALTH_INGEST_TOKEN` | Optional static Bearer token for `POST /api/health/ingest` (Apple Health bridge). A token can also be generated in Settings → Connected services. |
 | `FOOD_SEARCH_LIVE` | Set to `off` to disable live Open Food Facts product lookups in food search |
 
@@ -87,6 +91,10 @@ tests/            Vitest suites for the engine and the progression service
 
 Stack: Next.js 15 (App Router, server actions), React 19, TypeScript, Tailwind 4, Drizzle ORM + better-sqlite3, Zod, Recharts, Motion. PWA via web manifest + a small service worker.
 
+## Logging
+
+One floating **+ LOG** button on every tab opens Food · Workout · Sleep · Routine/Habit · More (ordered by what you log most). Food logging is one sheet everywhere: Recent, Search, Restaurant, Quick macros, Estimate, Recipe, with "I cooked this" on the confirm step. The UX audit behind the 0.4.0 layout is in `docs/ux-audit.md`.
+
 ## How ranking works (short version)
 
 * Each domain computes a 0–100 score from rolling 30/90-day windows of your logs, through anchor tables placed at research thresholds (e.g. 150 moderate minutes/week ≈ median → 50).
@@ -97,18 +105,32 @@ Stack: Next.js 15 (App Router, server actions), React 19, TypeScript, Tailwind 4
 
 Full detail with sources: `docs/ranking-methodology.md` and `docs/ranking-research.md`.
 
-## Apple Health (Oura → Apple Health → Ascend)
+## Oura Ring (the source)
 
-The preferred health-data path on iPhone. The web app cannot read HealthKit, so a small iOS
-bridge (a Shortcuts automation, or the native Swift bridge in `native/ios`) posts read-only
-samples to `/api/health/ingest`. The server de-duplicates overlapping sources (no double-counted
-steps), builds nights from sleep stages, matches Apple Health workouts to logged sessions instead
-of duplicating them, and never overwrites manual entries. Metrics show as available only when real
-samples have arrived. See `docs/apple-health.md`.
+Oura supplies sleep and steps. Connect in **Profile → Settings → Connected services → Connect with
+Oura** (an OAuth app: `OURA_CLIENT_ID` / `OURA_CLIENT_SECRET`, redirect URI
+`<APP_URL>/api/oura/callback`; do the connect step in a browser, not the home-screen app). The server
+then syncs by itself every 3 hours (`src/services/autoSync.ts`). A night is Oura's main sleep;
+naps are not added to it. See `docs/oura-integration.md`.
 
-## Oura Ring
+## Apple Health (optional, not in use)
 
-Connect in **Profile → Settings → Oura Ring**. Oura retired personal access tokens in Dec 2025, so the supported route is an OAuth app (two env vars). Without Oura, sleep and steps are logged manually in two taps. See `docs/oura-integration.md`.
+Kept working but tucked away under Connected services: a Shortcut or the native bridge can post
+samples to `/api/health/ingest` (UUID optional; duplicates caught server-side). Don't run it
+alongside Oura if the ring also writes to Apple Health. See `docs/apple-health.md` and
+`docs/apple-health-shortcut.md`.
+
+## Hosting (TFHealth)
+
+Live at `https://tfhealth.tfwebapps.com`, one container on a shared server:
+
+```bash
+docker compose -f compose.tfhealth.yml up -d --build   # build + (re)start; data is in the tfhealth-data volume
+```
+
+Secrets live in `.env.production` on the server (never committed): `APP_PASSWORD`, `AUTH_SECRET`,
+`APP_URL`, `OURA_CLIENT_ID`, `OURA_CLIENT_SECRET`, `AI_PROVIDER`, `AI_API_KEY`.
+`scripts/publish-tfhealth.sh` added the HTTPS site to the shared Caddy once. `master` is what runs.
 
 ## Data & privacy
 
@@ -117,6 +139,6 @@ Everything lives in `data/ascend.db` on the machine running the app. Financial f
 ## Testing
 
 ```bash
-npm test          # 118 tests: engine, XP ledger, quests, achievements, quest offers (no-penalty decline, expiry, XP bands, guardrails), AI contracts + fallback + cache, workout sessions/PRs, nutrition + meal plans
+npm test          # 128 tests: engine, XP ledger, quests, achievements, quest offers (no-penalty decline, expiry, XP bands, guardrails), AI contracts + fallback + cache, workout sessions/PRs, nutrition + meal plans, UX rules (health sources, + LOG ordering, meal-type inference, weight steppers)
 npm run typecheck
 ```

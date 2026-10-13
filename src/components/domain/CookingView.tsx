@@ -4,7 +4,7 @@ import type { DomainAssessment } from "@/ranking/types";
 import type { ProfileView } from "@/services/profile";
 import { loadMeals, loadRecipes } from "@/services/loaders";
 import { addDays, formatShort, formatWeekdayShort, lastNDays, startOfWeek } from "@/lib/dates";
-import { QuickLog } from "@/components/log/QuickLog";
+import { LogHereButton } from "@/components/log/LogHereButton";
 import { BarsChart, DayHeatmap } from "@/components/charts/Charts";
 import { Card, SectionTitle, Stat } from "@/components/ui/primitives";
 import { DeleteButton } from "./DeleteButton";
@@ -33,11 +33,10 @@ export function CookingView({ profile, range }: { profile: ProfileView; assessme
   });
 
   const favorites = recipes.filter((r) => r.isFavorite).slice(0, 4);
-  const recipeOptions = recipes.map((r) => ({ id: r.id, name: r.name, isFavorite: r.isFavorite, mealType: r.mealType }));
 
   return (
     <div className="space-y-4">
-      <QuickLog today={today} activeDomains={["cooking"]} recipes={recipeOptions} stepsTarget={profile.targets.stepsTarget} bedtimeTarget={null} hasOura={false} variant="buttons" />
+      <LogHereButton kind="food" label="Log food or a cooked meal" />
 
       <div className="grid grid-cols-3 gap-2.5">
         <Stat label="Meals" value={inRange.length} sub={`${Math.round((inRange.length / range) * 7 * 10) / 10}/wk`} />

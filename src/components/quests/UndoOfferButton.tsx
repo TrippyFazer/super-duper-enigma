@@ -15,14 +15,13 @@ export function UndoOfferButton({ id }: { id: number }) {
     <button
       disabled={pending}
       onClick={() => {
-        if (!window.confirm("Undo this completion? The XP it awarded is reversed and the quest returns to accepted.")) return;
         start(async () => {
           await uncompleteOfferAction(id);
           toast("Completion undone · XP reversed", "quest");
           router.refresh();
         });
       }}
-      className="press flex items-center gap-1 rounded-full border border-border px-2 py-1 text-[10px] text-text-2 disabled:opacity-50"
+      className="press flex h-10 items-center gap-1 rounded-full border border-border px-3 text-[11px] text-text-2 disabled:opacity-50"
     >
       <Undo2 size={11} /> Undo
     </button>

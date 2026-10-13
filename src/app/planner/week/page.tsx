@@ -13,7 +13,7 @@ import { WeekPlanner } from "@/components/food/WeekPlanner";
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Weekly preparation" };
 
-export default async function WeekPage({ searchParams }: { searchParams: Promise<{ week?: string }> }) {
+export default async function WeekPage({ searchParams }: { searchParams: Promise<{ week?: string; step?: string }> }) {
   const profile = getProfile();
   if (!profile.onboarded) redirect("/onboarding");
   const sp = await searchParams;
@@ -33,6 +33,7 @@ export default async function WeekPage({ searchParams }: { searchParams: Promise
       <PageHeader title="Weekly preparation" subtitle={`Sunday reset · planning ${weekLabel}`} back="/planner" />
       <WeekPlanner
         today={today}
+        initialStep={sp.step ?? null}
         weekStart={weekStart}
         weekLabel={weekLabel}
         aiEnabled={isAiEnabled()}

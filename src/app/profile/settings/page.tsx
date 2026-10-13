@@ -38,7 +38,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         <HeartPulse size={18} className="text-gold" />
         <div className="min-w-0 flex-1">
           <div className="text-sm font-medium">Connected services</div>
-          <div className="serif text-[13px] text-muted">Apple Health {health.connected ? "connected" : "not connected"}{oura.connected ? " · Oura connected" : ""}. Steps, sleep, workouts, HRV.</div>
+          <div className="serif text-[13px] text-muted">Oura {oura.connected ? "connected · syncs by itself" : "not connected"}{health.connected ? " · Apple Health" : ""}</div>
         </div>
         <ChevronRight size={16} className="text-faint" />
       </Link>

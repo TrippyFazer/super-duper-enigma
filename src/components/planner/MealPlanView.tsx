@@ -31,7 +31,7 @@ const STATUS_LABEL: Record<string, string> = { planned: "", prepared: "Prepped",
  * Today's plan with a real lifecycle. Generated ≠ eaten: only "Ate this" writes
  * calories. Skip / replace / edit / discard are all one tap, all reversible.
  */
-export function MealPlanView({ plan, aiEnabled, onAdjustOffer }: { plan: { source: string; calorieTarget: number; proteinTarget: number; meals: MealVM[] } | null; aiEnabled: boolean; onAdjustOffer?: (unplanned: string) => void }) {
+export function MealPlanView({ plan, aiEnabled, onAdjustOffer, hideDone }: { plan: { source: string; calorieTarget: number; proteinTarget: number; meals: MealVM[] } | null; aiEnabled: boolean; onAdjustOffer?: (unplanned: string) => void; /** Show only what is still to come (eaten/skipped hidden). */ hideDone?: boolean }) {
   const router = useRouter();
   const { notify, toast } = useFeedback();
   const [pending, start] = useTransition();
@@ -52,14 +52,24 @@ export function MealPlanView({ plan, aiEnabled, onAdjustOffer }: { plan: { sourc
       router.refresh();
     });
 
-  const visible = plan ? plan.meals.filter((m) => m.status !== "replaced" && m.status !== "discarded") : [];
-  const live = visible.filter((m) => m.status !== "skipped");
+  const all = plan ? plan.meals.filter((m) => m.status !== "replaced" && m.status !== "discarded") : [];
+  const visible = hideDone ? all.filter((m) => m.status === "planned" || m.status === "prepared") : all;
+  const live = all.filter((m) => m.status !== "skipped");
   const totals = live.reduce((a, m) => ({ c: a.c + m.calories, p: a.p + m.protein }), { c: 0, p: 0 });
   const eatenTotals = visible.filter((m) => m.status === "eaten").reduce((a, m) => ({ c: a.c + m.calories, p: a.p + m.protein }), { c: 0, p: 0 });
 
   return (
     <>
-      {!plan || visible.length === 0 ? (
+      {plan && all.length > 0 && visible.length === 0 ? (
+        <section className="plate px-4 py-4 text-center">
+          <p className="serif text-[14px] text-muted">Nothing left on today&apos;s plan.</p>
+          <div className="mt-2 flex justify-center gap-2">
+            <Button size="sm" variant="secondary" disabled={pending} onClick={() => generate({ force: true })}>
+              <RefreshCw size={13} /> New plan
+            </Button>
+          </div>
+        </section>
+      ) : !plan || visible.length === 0 ? (
         <section className="plate p-5 text-center">
           <Sparkles size={26} className="mx-auto text-gold" />
           <div className="display mt-3 text-lg font-semibold">Generate today&apos;s meals</div>
@@ -106,7 +116,7 @@ export function MealPlanView({ plan, aiEnabled, onAdjustOffer }: { plan: { sourc
                     Ate this
                   </button>
                 )}
-                <button aria-label={`Options for ${m.name}`} onClick={() => setMenu(m)} className="press flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-faint hover:bg-white/5">
+                <button aria-label={`Options for ${m.name}`} onClick={() => setMenu(m)} className="press flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-faint hover:bg-white/5">
                   <MoreHorizontal size={16} />
                 </button>
               </li>

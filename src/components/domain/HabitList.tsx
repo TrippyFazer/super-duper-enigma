@@ -74,7 +74,7 @@ export function HabitList({ today, habits, stats }: { today: string; habits: Hab
             const due = s?.dueToday ?? true;
             return (
               <li key={h.id} className="flex items-center gap-3 px-4 py-3">
-                <button type="button" onClick={() => toggle(h)} aria-pressed={done} className={cx("press flex h-8 w-8 shrink-0 items-center justify-center rounded-full border transition-colors", done ? "border-success bg-success text-[#071a10]" : "border-border-strong bg-black/30 text-transparent")}>
+                <button type="button" onClick={() => toggle(h)} aria-pressed={done} className={cx("press flex h-11 w-11 shrink-0 items-center justify-center rounded-full border transition-colors", done ? "border-success bg-success text-[#071a10]" : "border-border-strong bg-black/30 text-transparent")}>
                   <Check size={16} strokeWidth={3} />
                 </button>
                 <div className="min-w-0 flex-1">
@@ -90,7 +90,7 @@ export function HabitList({ today, habits, stats }: { today: string; habits: Hab
                     {!due && !done ? " · not due today" : ""}
                   </div>
                 </div>
-                <button aria-label="Habit settings" onClick={() => setEditing(h)} className="press flex h-8 w-8 items-center justify-center rounded-full text-faint hover:bg-white/5">
+                <button aria-label="Habit settings" onClick={() => setEditing(h)} className="press flex h-11 w-11 items-center justify-center rounded-full text-faint hover:bg-white/5">
                   <Settings2 size={15} />
                 </button>
               </li>

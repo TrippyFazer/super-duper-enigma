@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.4.1 — 2026-10-13 · Hosted, on Oura
+
+* **Oura is the source**: shown first in Connected services, named on Sleep/Fitness, last-sync time from Oura; Apple Health tucked under "Optional" (still works, not in use).
+* **Oura syncs by itself** every 3 hours (`OURA_AUTO_SYNC_HOURS`), last 3 days each time.
+* **Oura fixes**: last night was never synced (Oura's `end_date` is exclusive); naps no longer added to the night (an 8h20m night showed as 10h09m); a night re-synced below target loses its target XP.
+* **Hosting**: password gate (`APP_PASSWORD`), Dockerfile + `compose.tfhealth.yml`, `TZ` so server-rendered times match the phone, publish script for the shared Caddy. Visible name TFHealth.
+* **Apple Health ingest without UUIDs** (for Shortcuts): duplicates caught by type + start + end + source; units converted; clear per-sample errors.
+
+## 0.4.0 — 2026-10-13 · "Organize it" (UX refactor)
+
+Product review pass. No ranking logic changed; nothing deep removed. Full audit with problem / why / change in `docs/ux-audit.md`.
+
+* **Universal + LOG**: one floating button above the nav on every tab → Food · Workout · Sleep · Routine/Habit · More, ordered by recent use. Deep link `?log=…` on any page.
+* **One food logger** everywhere (Recent · Search · Restaurant · Quick · Estimate · Recipe), meal type inferred from the clock and editable, one tap select + one tap confirm, "I cooked this" on the draft so one action updates nutrition and cooking (XP once). Cooked-meal-only sheet removed.
+* **Home = Today**: hero → one context card (special quest › Sunday reset › morning motivation › wind-down › weekly review) → one Today card (Workout / Nutrition / Steps / Sleep / Quests / Routines & habits rows) → compact progression strip → Next rank with per-domain NEEDS.
+* **Planner = Future**: This week · Weekly preparation (Sunday reset / Groceries / Meal prep deep links) · Food · Tools. Dashboard duplication removed.
+* **Food screen IA**: Today → + FOOD → Eaten → Remaining plan; rows show kcal · protein; carbs/fat behind details; delete with UNDO.
+* **Workout tracker**: Copy last, equipment-aware −/+ weight steppers, auto-focus next field, plain-language session menu; split into header / exercise card / set row / menus.
+* **Health sources centralised** (`health/sources.ts`): manual sleep/steps shown only when no automatic source has real samples; Oura UI marked legacy and collapsed.
+* Tap targets ≥44 px, quieter daily copy, UNDO toasts for lightweight actions, large components split (NutritionLog, SessionTracker, WeekPlanner, PlannerSettings). 128 tests.
+
 ## 0.3.0 — 2026-10-13 · "Real life is messy"
 
 Product-quality pass from beta testing: the app now separates **plan** from **reality**, and every record can be corrected.

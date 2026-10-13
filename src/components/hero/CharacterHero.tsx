@@ -20,7 +20,7 @@ export function CharacterHero({ name, equippedTitle, assessment, unread }: { nam
       <div className="relative px-4 pb-5 pt-3">
         <div className="flex items-start justify-between">
           <div className="eyebrow pt-1 text-text-2/80">TFHealth</div>
-          <Link href="/notifications" aria-label={unread ? `${unread} unread notifications` : "Notifications"} className="press relative flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-black/30 text-text-2 backdrop-blur">
+          <Link href="/notifications" aria-label={unread ? `${unread} unread notifications` : "Notifications"} className="press relative flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-black/30 text-text-2 backdrop-blur">
             <Bell size={17} />
             {unread > 0 && <span className="tabular absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-gold px-1 text-[10px] font-bold text-[#1a1406]">{unread > 9 ? "9+" : unread}</span>}
           </Link>
