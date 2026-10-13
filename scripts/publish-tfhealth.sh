@@ -37,11 +37,11 @@ docker network connect tfhealth procurement-caddy 2>/dev/null && echo "    conne
 if grep -qF "$HOST" "$CADDYFILE"; then
   echo "==> ${HOST} is already in the Caddyfile; leaving it alone."
 else
-  cp -a "$CADDYFILE" "$BACKUP"
+  sudo cp -a "$CADDYFILE" "$BACKUP"
   echo "==> Backed up to ${BACKUP}"
-  # Appended with >>, which writes through the same inode: Docker bind-mounts
+  # Appended with tee -a, which writes through the same inode: Docker bind-mounts
   # this single file by inode, and a mv-style rewrite is invisible to Caddy.
-  cat >> "$CADDYFILE" <<CADDY
+  sudo tee -a "$CADDYFILE" >/dev/null <<CADDY
 
 # TFHealth — its own site, its own stack (/home/ubuntu/tfhealth).
 ${HOST} {
@@ -54,7 +54,7 @@ fi
 echo "==> Validating before reloading"
 if ! docker exec procurement-caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>&1; then
   echo "    Invalid config; restoring the backup. Caddy was never reloaded." >&2
-  [ -f "$BACKUP" ] && cat "$BACKUP" > "$CADDYFILE"
+  [ -f "$BACKUP" ] && sudo cp "$BACKUP" "$CADDYFILE"
   exit 1
 fi
 docker exec -w /etc/caddy procurement-caddy caddy reload --config /etc/caddy/Caddyfile
@@ -70,10 +70,10 @@ echo "    https://${HOST}/ -> ${NEW}    existing site -> ${AFTER}"
 
 if [ "$AFTER" != "$BEFORE" ]; then
   echo "THE EXISTING SITE CHANGED (${BEFORE} -> ${AFTER}). Rolling back." >&2
-  [ -f "$BACKUP" ] && cat "$BACKUP" > "$CADDYFILE"
+  [ -f "$BACKUP" ] && sudo cp "$BACKUP" "$CADDYFILE"
   docker exec -w /etc/caddy procurement-caddy caddy reload --config /etc/caddy/Caddyfile
   exit 1
 fi
 echo
 echo "TFHealth is at https://${HOST}"
-[ -f "$BACKUP" ] && echo "Undo: cat ${BACKUP} > ${CADDYFILE} && docker exec -w /etc/caddy procurement-caddy caddy reload --config /etc/caddy/Caddyfile"
+[ -f "$BACKUP" ] && echo "Undo: sudo cp ${BACKUP} ${CADDYFILE} && docker exec -w /etc/caddy procurement-caddy caddy reload --config /etc/caddy/Caddyfile"
