@@ -1,9 +1,19 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE, gateEnabled, validSession } from "@/lib/session";
 
-/** Reachable without signing in: the login itself, and what iOS fetches to
- *  put the icon on the home screen (it does not send the cookie for those). */
-const OPEN = ["/login", "/api/login", "/manifest.webmanifest", "/icons/", "/sw.js", "/offline"];
+/** Reachable without signing in: the login itself, what iOS fetches to put
+ *  the icon on the home screen (it does not send the cookie for those), and
+ *  the Apple Health ingest, which a Shortcut or the iOS bridge calls with its
+ *  own bearer token and no cookie — that route checks the token itself. */
+const OPEN = [
+  "/login",
+  "/api/login",
+  "/manifest.webmanifest",
+  "/icons/",
+  "/sw.js",
+  "/offline",
+  "/api/health/ingest",
+];
 
 export async function middleware(request: NextRequest) {
   if (!gateEnabled()) return NextResponse.next();
