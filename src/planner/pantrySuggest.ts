@@ -1,4 +1,6 @@
-import { canonicalName, findIngredient } from "@/food/ingredients";
+import { pantryCovers } from "@/food/families";
+import { findIngredient } from "@/food/ingredients";
+import { recipeExcluded, validateMeal, type FoodRules } from "@/food/rules";
 import type { RecipeLite } from "./mealTemplates";
 
 /**
@@ -15,6 +17,8 @@ export interface SuggestInput {
   maxMinutes: number;
   dislikes: string[];
   mealType?: "breakfast" | "lunch" | "dinner" | "snack";
+  /** the one rules engine; when absent only dislikes apply */
+  rules?: FoodRules | null;
 }
 
 export interface Suggestion {
@@ -33,20 +37,26 @@ export interface Suggestion {
 }
 
 export function suggestFromPantryTemplate(input: SuggestInput, limit = 4): Suggestion[] {
-  const pantry = new Set(input.pantry.map(canonicalName));
-  const expiring = new Set(input.expiring.map(canonicalName));
+  const have = (i: string) => input.pantry.some((p) => pantryCovers(i, p));
   const out: Suggestion[] = [];
-  for (const r of input.recipes) {
-    if (r.calories == null || r.proteinG == null) continue;
-    if (input.mealType && r.mealType !== input.mealType && r.mealType !== "any") continue;
-    if (input.dislikes.some((d) => d && `${r.name} ${r.ingredients.join(" ")}`.toLowerCase().includes(d.toLowerCase()))) continue;
+  for (const raw of input.recipes) {
+    if (raw.calories == null || raw.proteinG == null) continue;
+    if (input.mealType && raw.mealType !== input.mealType && raw.mealType !== "any") continue;
+    if (input.dislikes.some((d) => d && `${raw.name} ${raw.ingredients.join(" ")}`.toLowerCase().includes(d.toLowerCase()))) continue;
+    let r = raw;
+    if (input.rules) {
+      if (recipeExcluded(raw, input.rules)) continue;
+      const v = validateMeal({ name: raw.name, ingredients: raw.ingredients, calories: raw.calories, protein: raw.proteinG, carbs: raw.carbsG ?? 0, fat: raw.fatG ?? 0 }, input.rules);
+      if (v.status === "rejected") continue;
+      if (v.status === "repaired") r = { ...raw, ingredients: v.meal.ingredients, calories: v.meal.calories, proteinG: v.meal.protein, carbsG: v.meal.carbs, fatG: v.meal.fat };
+    }
     const core = r.ingredients.filter((i) => !findIngredient(i)?.staple);
-    const uses = core.filter((i) => pantry.has(canonicalName(i)));
-    const additional = core.filter((i) => !pantry.has(canonicalName(i)));
+    const uses = core.filter(have);
+    const additional = core.filter((i) => !have(i));
     const coverage = core.length ? uses.length / core.length : 0;
     if (coverage < 0.5 || additional.length > 2) continue;
     const minutes = r.prepTimeMin + r.cookTimeMin;
-    const usesExpiring = uses.filter((i) => expiring.has(canonicalName(i)));
+    const usesExpiring = uses.filter((i) => input.expiring.some((e) => pantryCovers(i, e)));
     let s = coverage * 10 - additional.length * 2.5;
     s += usesExpiring.length * 3;
     s += minutes <= input.maxMinutes ? 2 : -4;
@@ -56,7 +66,7 @@ export function suggestFromPantryTemplate(input: SuggestInput, limit = 4): Sugge
     const whyParts = [`Uses ${uses.length} of ${core.length} ingredients you have`];
     if (usesExpiring.length) whyParts.push(`uses ${usesExpiring.join(", ")} before it goes off`);
     if (minutes <= input.maxMinutes) whyParts.push(`${minutes} min`);
-    out.push({ name: r.name, calories: r.calories, protein: r.proteinG, carbs: r.carbsG ?? 0, fat: r.fatG ?? 0, prepMinutes: minutes, uses, additional, steps: [], why: whyParts.join(" · "), recipeId: r.id, coverage: Math.round(coverage * 100) / 100 + s / 1000 });
+    out.push({ name: r.name, calories: r.calories!, protein: r.proteinG!, carbs: r.carbsG ?? 0, fat: r.fatG ?? 0, prepMinutes: minutes, uses, additional, steps: [], why: whyParts.join(" · "), recipeId: r.id, coverage: Math.round(coverage * 100) / 100 + s / 1000 });
   }
   return out.sort((a, b) => b.coverage - a.coverage).slice(0, limit).map((s) => ({ ...s, coverage: Math.round(s.coverage * 100) / 100 }));
 }

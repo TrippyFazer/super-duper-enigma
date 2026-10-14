@@ -16,6 +16,9 @@ import { CoachReplySchema, DayAdjustSchema, EventQuestFramingSchema, FoodEstimat
 import { generateTemplateWeek, shoppingListFromMeals, buildPrepPlan, type GeneratedWeek, type GenerateWeekInput, type WeekMeal } from "@/planner/weekTemplates";
 import { suggestFromPantryTemplate, type SuggestInput, type Suggestion } from "@/planner/pantrySuggest";
 import { canonicalName, findIngredient } from "@/food/ingredients";
+import { pantryCovers } from "@/food/families";
+import { deriveRules, recipeExcluded, validateMeal, type FoodRules } from "@/food/rules";
+import { snacksFor } from "@/planner/weekTemplates";
 import { proposeDayAdjustment, type AdjustProposal, type RemainingSlot } from "@/planner/dayAdjust";
 
 /**
@@ -104,6 +107,44 @@ export async function generateWorkout(ctx: AiContext, input: GenerateInput, opts
   return { plan, source: "template", cached: false };
 }
 
+// ----------------------------------------------------------- food rules ----
+/** The prompt gets the rules as MUST / SHOULD lines; the validator below enforces them regardless. */
+function rulesPrompt(ctx: AiContext): string {
+  const r = ctx.nutrition.foodRules;
+  const lines: string[] = [];
+  if (r.hardRestrictions.length) lines.push(`MUST NEVER include: ${r.hardRestrictions.join(", ")}.`);
+  if (r.ingredientSubstitutions.length) lines.push(`Ingredient rules: ${r.ingredientSubstitutions.map((x) => `${x.never ? "never use" : "avoid"} ${x.from}, use ${x.to} instead`).join("; ")}.`);
+  if (r.dislikes.length) lines.push(`Dislikes (avoid): ${r.dislikes.join(", ")}.`);
+  if (r.likes.length) lines.push(`Likes: ${r.likes.join(", ")}.`);
+  if (r.preferences.length) lines.push(`Prefers: ${r.preferences.join(", ")}.`);
+  if (r.diets.length) lines.push(`Diet: ${r.diets.join(", ")}.`);
+  return lines.join(" ");
+}
+
+/**
+ * NEVER TRUST RAW MODEL OUTPUT. Every generated meal is normalised, substituted
+ * and validated against the user's rules: repaired when a substitute exists,
+ * rejected when a hard rule is violated with no way out.
+ */
+function validateMeals<T extends { name: string; ingredients: string[]; calories: number; protein: number; carbs: number; fat: number; notes?: string }>(meals: T[], rules: FoodRules): { meals: T[]; rejected: string[]; repaired: string[] } {
+  const out: T[] = [];
+  const rejected: string[] = [];
+  const repaired: string[] = [];
+  for (const m of meals) {
+    if (recipeExcluded(m, rules)) {
+      rejected.push(m.name);
+      continue;
+    }
+    const v = validateMeal(m, rules);
+    if (v.status === "rejected") rejected.push(m.name);
+    else {
+      if (v.status === "repaired") repaired.push(`${m.name}: ${v.changes.map((c) => `${c.from} → ${c.to}`).join(", ")}`);
+      out.push(v.meal);
+    }
+  }
+  return { meals: out, rejected, repaired };
+}
+
 // --------------------------------------------------------------- meals ----
 export async function generateMeals(ctx: AiContext, input: { date: ISODate; recipes: RecipeLite[]; prefs: Parameters<typeof generateTemplateMealPlan>[0]["prefs"]; calorieTarget: number; proteinTarget: number; onHand?: string[]; recentRecipeIds?: number[]; force?: boolean; request?: string }): Promise<GenResult<GeneratedMealPlan>> {
   const key = `meals:${input.date}:${hash({ p: input.prefs, c: input.calorieTarget, pr: input.proteinTarget, onHand: input.onHand ?? [], req: input.request ?? "" })}`;
@@ -119,7 +160,7 @@ export async function generateMeals(ctx: AiContext, input: { date: ISODate; reci
           system: SYSTEM_BASE + " You are generating one day of meals.",
           user: [
             "Create today's meal plan as JSON: {calorieTarget, proteinTarget, rationale, meals[{mealType (breakfast|lunch|dinner|snack), name, calories, protein, carbs, fat, ingredients[], notes}]}.",
-            `Land within ±10% of ${input.calorieTarget} kcal and at or above ${input.proteinTarget} g protein. Respect diet preferences and dislikes. Prefer saved recipes when they fit. Keep prep under ${input.prefs.maxPrepMin} minutes per meal. ${input.prefs.mealsPerDay} meals plus snacks as needed.`,
+            `Land within ±10% of ${input.calorieTarget} kcal and at or above ${input.proteinTarget} g protein. ${rulesPrompt(ctx)} Prefer saved recipes when they fit. Keep prep under ${input.prefs.maxPrepMin} minutes per meal. ${input.prefs.mealsPerDay} meals plus snacks as needed.`,
             input.onHand?.length ? `Ingredients on hand: ${input.onHand.join(", ")}.` : "",
             input.request ? `User request: ${input.request}` : "",
             `Context: ${JSON.stringify({ profile: ctx.profile, nutrition: ctx.nutrition })}`,
@@ -129,13 +170,17 @@ export async function generateMeals(ctx: AiContext, input: { date: ISODate; reci
         MealPlanSchema,
       );
       const unsafe = out.calorieTarget < 1200 || out.meals.some((m) => violatesSafety(`${m.name} ${m.notes}`));
-      if (!unsafe) {
-        const meals = out.meals.map((m, i) => {
+      const rules = deriveRules(input.prefs);
+      const checked = validateMeals(out.meals.map((m) => ({ ...m, notes: m.notes || undefined })), rules);
+      // A day that lost a main meal to the rules is not a day plan: fall back to the template (which obeys them by construction).
+      const lostMain = out.meals.some((m) => m.mealType !== "snack" && checked.rejected.includes(m.name));
+      if (!unsafe && !lostMain && checked.meals.length) {
+        const meals = checked.meals.map((m, i) => {
           const match = input.recipes.find((r) => r.name.toLowerCase() === m.name.toLowerCase());
           return { index: i, mealType: m.mealType, name: m.name, calories: m.calories, protein: m.protein, carbs: m.carbs, fat: m.fat, ingredients: m.ingredients, recipeId: match?.id ?? null, notes: m.notes || undefined };
         });
         const totals = meals.reduce((a, m) => ({ calories: a.calories + m.calories, protein: a.protein + m.protein, carbs: a.carbs + m.carbs, fat: a.fat + m.fat }), { calories: 0, protein: 0, carbs: 0, fat: 0 });
-        const plan: GeneratedMealPlan = { calorieTarget: input.calorieTarget, proteinTarget: input.proteinTarget, meals, totals, rationale: out.rationale };
+        const plan: GeneratedMealPlan = { calorieTarget: input.calorieTarget, proteinTarget: input.proteinTarget, meals, totals, rationale: checked.repaired.length ? `${out.rationale} Adjusted to your food rules (${checked.repaired.join("; ")}).` : out.rationale };
         writeCache("meals", key, input.date, { plan, source: "ai" }, provider);
         return { plan, source: "ai", cached: false };
       }
@@ -252,11 +297,12 @@ export async function estimateFood(description: string): Promise<(AiFoodEstimate
 
 // ---------------------------------------------------------- day adjust ----
 /** Propose replacements for the rest of today. AI when available, otherwise a recipe/pantry template. Never applied without approval. */
-export async function adjustDay(ctx: AiContext, input: { remaining: RemainingSlot[]; remainingCalories: number; remainingProtein: number; recipes: RecipeLite[]; pantry: string[]; maxPrepMin: number; dislikes: string[]; unplanned: string }): Promise<(AdjustProposal & { source: "ai" | "template" }) | null> {
+export async function adjustDay(ctx: AiContext, input: { remaining: RemainingSlot[]; remainingCalories: number; remainingProtein: number; recipes: RecipeLite[]; pantry: string[]; maxPrepMin: number; dislikes: string[]; unplanned: string; rules?: FoodRules | null }): Promise<(AdjustProposal & { source: "ai" | "template" }) | null> {
   const fallback = () => {
     const p = proposeDayAdjustment(input);
     return p ? { ...p, source: "template" as const } : null;
   };
+  const rules = input.rules ?? null;
   const provider = getProvider();
   if (!provider || !input.remaining.length) return fallback();
   try {
@@ -266,7 +312,7 @@ export async function adjustDay(ctx: AiContext, input: { remaining: RemainingSlo
         user: [
           `Unplanned meal eaten: ${input.unplanned}. Remaining calories for today: ${input.remainingCalories} kcal, protein still needed: ${input.remainingProtein} g.`,
           `Remaining planned slots: ${JSON.stringify(input.remaining.map((r) => ({ slot: r.slot, mealType: r.mealType, planned: r.name, calories: r.calories })))}.`,
-          `On hand: ${input.pantry.join(", ") || "unknown"}. Max prep ${input.maxPrepMin} min. Dislikes: ${input.dislikes.join(", ") || "none"}.`,
+          `On hand: ${input.pantry.join(", ") || "unknown"}. Max prep ${input.maxPrepMin} min. ${rulesPrompt(ctx)}`,
           `Saved recipes: ${input.recipes.slice(0, 25).map((r) => `${r.name} (${r.calories} kcal, ${r.proteinG} g)`).join("; ")}.`,
           "Return JSON {meals[{replacesSlot, name, calories, protein, carbs, fat, ingredients[], notes}], rationale}. One replacement per remaining slot, in slot order.",
         ].join("\n"),
@@ -278,8 +324,14 @@ export async function adjustDay(ctx: AiContext, input: { remaining: RemainingSlo
       .map((m) => {
         const slot = input.remaining.find((r) => r.slot === m.replacesSlot);
         if (!slot || violatesSafety(`${m.name} ${m.notes}`)) return null;
-        const match = input.recipes.find((r) => r.name.toLowerCase() === m.name.toLowerCase());
-        return { replacesId: slot.id, replacesSlot: slot.slot, mealType: slot.mealType, name: m.name, calories: m.calories, protein: m.protein, carbs: m.carbs, fat: m.fat, ingredients: m.ingredients, recipeId: match?.id ?? null, notes: m.notes };
+        let meal: { name: string; ingredients: string[]; calories: number; protein: number; carbs: number; fat: number; notes?: string } = { name: m.name, ingredients: m.ingredients, calories: m.calories, protein: m.protein, carbs: m.carbs, fat: m.fat, notes: m.notes };
+        if (rules) {
+          const v = validateMeals([meal], rules);
+          if (!v.meals.length) return null;
+          meal = v.meals[0];
+        }
+        const match = input.recipes.find((r) => r.name.toLowerCase() === meal.name.toLowerCase());
+        return { replacesId: slot.id, replacesSlot: slot.slot, mealType: slot.mealType, name: meal.name, calories: meal.calories, protein: meal.protein, carbs: meal.carbs, fat: meal.fat, ingredients: meal.ingredients, recipeId: match?.id ?? null, notes: meal.notes ?? "" };
       })
       .filter((x): x is NonNullable<typeof x> => !!x);
     if (!meals.length) return fallback();
@@ -310,8 +362,8 @@ export async function generateWeek(ctx: AiContext, input: GenerateWeekInput & { 
           system: SYSTEM_BASE + " You plan one week of meals for a home cook on a grocery budget. Optimise for ingredient reuse (few core ingredients used across many meals), low waste, convenience (quick weekday meals, batch prep), hitting calorie/protein targets, and staying within budget. Use the pantry first. Prices are rough US supermarket estimates.",
           user: [
             `Plan ${input.days ?? 7} days starting ${input.weekStart} (dates ${input.weekStart} to ${addDaysIso(input.weekStart, (input.days ?? 7) - 1)}). Budget $${input.budget} (${input.budgetMode}). Targets ${input.calorieTarget} kcal and ${input.proteinTarget} g protein per day.`,
-            `Meals needed: ${JSON.stringify(input.mealsNeeded)} (eatingOut = dinners NOT to plan; prefer Friday/Saturday when those dates are in range). Preferences: ${JSON.stringify(input.week)}. Diet: ${input.prefs.dietPrefs.join(", ") || "none"}. Dislikes: ${input.prefs.dislikes.join(", ") || "none"}. Likes: ${input.prefs.likes.join(", ") || "none"}. Max prep ${input.prefs.maxPrepMin} min on weekdays.`,
-            `Pantry on hand (do not buy these unless more is needed): ${input.pantry.map((p) => `${p.name}${p.servings != null ? ` (~${p.servings} servings)` : ""}`).join(", ") || "nothing recorded"}.`,
+            `Meals needed: ${JSON.stringify(input.mealsNeeded)} (eatingOut = dinners NOT to plan; prefer Friday/Saturday when those dates are in range). Preferences: ${JSON.stringify(input.week)}. ${rulesPrompt(ctx)} Max prep ${input.prefs.maxPrepMin} min on weekdays.`,
+            `Pantry on hand — PLAN AROUND IT FIRST, use expiring and opened items early, and do not buy these unless more is needed: ${input.pantry.map((p) => `${p.name}${p.servings != null ? ` (~${p.servings} servings)` : p.level ? ` (${p.level === "lot" ? "a lot" : p.level})` : ""}${p.expiring ? " [expiring]" : ""}${p.opened ? " [opened]" : ""}`).join(", ") || "nothing recorded"}.`,
             `Saved recipes you may reuse by exact name: ${input.recipes.slice(0, 40).map((r) => `${r.name} [${r.mealType}, ${r.calories} kcal, ${r.proteinG} g, ${r.ingredients.join("/")}]`).join("; ")}.`,
             "Return JSON {rationale, days[{date, meals[{mealType, name, calories, protein, carbs, fat, ingredients[{name, qty, unit}], prepMinutes, prepAhead}]}], shoppingList[{name, category, qty, unit, estPrice, usedIn[]}], prepPlan[{name, servings, minutes, supports[]}]}. Keep to ~10-14 distinct ingredients beyond staples. Leftover lunches should be named 'Leftover <dinner>'.",
             `Context: ${JSON.stringify({ nutrition: ctx.nutrition, profile: ctx.profile })}`,
@@ -320,19 +372,45 @@ export async function generateWeek(ctx: AiContext, input: GenerateWeekInput & { 
         },
         WeeklyPlanSchema,
       );
+      const rules = input.rules ?? deriveRules(input.prefs);
       const meals: WeekMeal[] = [];
+      const rejected: string[] = [];
+      const repaired: string[] = [];
       for (const day of out.days) {
         if (day.date < input.weekStart || day.date > addDaysIso(input.weekStart, (input.days ?? 7) - 1)) continue;
         for (const m of day.meals) {
           if (violatesSafety(`${m.name}`)) continue;
           const match = input.recipes.find((r) => r.name.toLowerCase() === m.name.toLowerCase().replace(/^leftover /, ""));
-          meals.push({ date: day.date, mealType: m.mealType, name: m.name, calories: m.calories, protein: m.protein, carbs: m.carbs, fat: m.fat, ingredients: m.ingredients.map((i) => i.name), recipeId: match?.id ?? null, prepMinutes: m.prepMinutes, leftover: /^leftover /i.test(m.name) });
+          // keep the model's quantities ("2 cups rice") so requirements are quantity-aware
+          const ingredients = m.ingredients.map((i) => (i.qty && i.unit && !(i.qty === 1 && i.unit === "each") ? `${i.qty} ${i.unit} ${i.name}` : i.name));
+          const v = validateMeals([{ name: m.name, ingredients, calories: m.calories, protein: m.protein, carbs: m.carbs, fat: m.fat, notes: undefined as string | undefined }], rules);
+          if (!v.meals.length) {
+            rejected.push(m.name);
+            continue;
+          }
+          repaired.push(...v.repaired);
+          const vm = v.meals[0];
+          meals.push({ date: day.date, mealType: m.mealType, name: vm.name, calories: vm.calories, protein: vm.protein, carbs: vm.carbs, fat: vm.fat, ingredients: vm.ingredients, recipeId: match?.id ?? null, prepMinutes: m.prepMinutes, leftover: /^leftover /i.test(m.name), notes: vm.notes });
+        }
+      }
+      // Fill slots the rules rejected from the template library (never leave a day without a main meal).
+      if (rejected.length) {
+        const snacks = snacksFor(rules);
+        for (const day of out.days) {
+          for (const m of day.meals) {
+            if (!rejected.includes(m.name) || meals.some((x) => x.date === day.date && x.mealType === m.mealType)) continue;
+            const pool = input.recipes.filter((r) => r.calories != null && r.proteinG != null && (r.mealType === m.mealType || r.mealType === "any") && !recipeExcluded(r, rules));
+            const pick = pool[0];
+            if (pick) {
+              const pv = validateMeal({ name: pick.name, ingredients: pick.ingredients, calories: pick.calories!, protein: pick.proteinG!, carbs: pick.carbsG ?? 0, fat: pick.fatG ?? 0 }, rules);
+              if (pv.status !== "rejected") meals.push({ date: day.date, mealType: m.mealType, name: pv.meal.name, calories: pv.meal.calories, protein: pv.meal.protein, carbs: pv.meal.carbs, fat: pv.meal.fat, ingredients: pv.meal.ingredients, recipeId: pick.id, prepMinutes: pick.prepTimeMin + pick.cookTimeMin, notes: `Replaced ${m.name} (your food rules)` });
+            } else if (m.mealType === "snack" && snacks[0]) meals.push({ date: day.date, mealType: "snack", name: snacks[0].name, calories: snacks[0].calories, protein: snacks[0].protein, carbs: snacks[0].carbs, fat: snacks[0].fat, ingredients: snacks[0].ingredients, recipeId: null, prepMinutes: 2 });
+          }
         }
       }
       const dinners = meals.filter((m) => m.mealType === "dinner").length;
       if (meals.length < Math.min(7, (input.days ?? 7)) || dinners < Math.min(3, input.mealsNeeded.dinner)) throw new Error("AI week too thin");
-      const pantry = new Map(input.pantry.map((p) => [canonicalName(p.name), p.servings ?? 2]));
-      const list = shoppingListFromMeals(meals, pantry, input);
+      const list = shoppingListFromMeals(meals, input.pantry, input, rules);
       // Fill prices the catalog doesn't know from the AI's estimate.
       for (const item of list.items) {
         if (item.estPrice == null) {
@@ -342,7 +420,8 @@ export async function generateWeek(ctx: AiContext, input: GenerateWeekInput & { 
       }
       const total = Math.round(list.items.reduce((a, i) => a + (i.estPrice ?? 0), 0) * 100) / 100;
       const prep = out.prepPlan.length ? { items: out.prepPlan.map((p) => ({ name: p.name, servings: p.servings, minutes: p.minutes, supports: p.supports })), minutes: Math.round(Math.max(...out.prepPlan.map((p) => p.minutes)) + out.prepPlan.reduce((a, p) => a + p.minutes, 0) * 0.3) } : buildPrepPlan(meals.filter((m) => !m.leftover && m.mealType !== "snack"));
-      const plan: GeneratedWeek = { weekStart: input.weekStart, meals, shoppingList: list.items, prepPlan: prep.items, prepMinutes: prep.minutes, estimatedCost: total, reusePct: list.reusePct, staplesAssumed: list.staples, rationale: out.rationale || "Planned for reuse and budget.", distinctRecipes: new Set(meals.filter((m) => !m.leftover && m.mealType !== "snack").map((m) => m.name)).size };
+      const ruleNotes = [...(repaired.length ? [`Adjusted to your food rules: ${[...new Set(repaired)].slice(0, 4).join("; ")}.`] : []), ...(rejected.length ? [`${rejected.length} suggested meal${rejected.length === 1 ? "" : "s"} broke a food rule and ${rejected.length === 1 ? "was" : "were"} replaced.`] : [])];
+      const plan: GeneratedWeek = { weekStart: input.weekStart, meals, shoppingList: list.items, prepPlan: prep.items, prepMinutes: prep.minutes, estimatedCost: total, reusePct: list.reusePct, staplesAssumed: list.staples, rationale: [out.rationale || "Planned for reuse and budget.", ...ruleNotes].join(" "), distinctRecipes: new Set(meals.filter((m) => !m.leftover && m.mealType !== "snack").map((m) => m.name)).size };
       writeCache("week", key, input.weekStart, { plan, source: "ai" }, provider);
       return { plan, source: "ai", cached: false };
     } catch (e) {
@@ -373,20 +452,33 @@ export async function suggestFromPantry(ctx: AiContext, input: SuggestInput & { 
       {
         system: SYSTEM_BASE + " You suggest 2-4 realistic meals from what the user already has. Prefer using ingredients that are expiring. At most 2 additional ingredients per suggestion. Include short steps.",
         user: [
-          `Request context: ${JSON.stringify({ availableIngredients: input.pantry, expiringIngredients: input.expiring, remainingCalories: input.remainingCalories, remainingProtein: input.remainingProtein, maxPrepMinutes: input.maxMinutes, mealType: input.mealType ?? "dinner", dislikes: input.dislikes, budgetRemaining: input.budgetRemaining ?? null, recentMeals: input.recentMeals ?? [], foodPreferences: ctx.nutrition.dietPrefs })}`,
+          `Request context: ${JSON.stringify({ availableIngredients: input.pantry, expiringIngredients: input.expiring, remainingCalories: input.remainingCalories, remainingProtein: input.remainingProtein, maxPrepMinutes: input.maxMinutes, mealType: input.mealType ?? "dinner", budgetRemaining: input.budgetRemaining ?? null, recentMeals: input.recentMeals ?? [], foodRules: ctx.nutrition.foodRules })}`,
+          rulesPrompt(ctx),
           "Return JSON {suggestions[{name, calories, protein, carbs, fat, prepMinutes, uses[], additional[], steps[], why}]}.",
         ].join("\n"),
         maxTokens: 1200,
       },
       RecipeSuggestionSchema,
     );
-    const pantry = new Set(input.pantry.map(canonicalName));
+    const have = (i: string) => input.pantry.some((p) => pantryCovers(i, p));
+    const rules = input.rules ?? null;
     const suggestions: Suggestion[] = out.suggestions
       .filter((s) => !violatesSafety(`${s.name} ${s.why}`))
       .map((s) => {
-        const uses = s.uses.filter((u) => pantry.has(canonicalName(u)));
-        const core = [...s.uses, ...s.additional].filter((i) => !findIngredient(i)?.staple);
-        return { ...s, uses, recipeId: input.recipes.find((r) => r.name.toLowerCase() === s.name.toLowerCase())?.id ?? null, coverage: core.length ? Math.round((uses.length / core.length) * 100) / 100 : 0 };
+        if (!rules) return s;
+        // same validator as every plan: repair substitutions, drop hard violations
+        const v = validateMeals([{ name: s.name, ingredients: [...s.uses, ...s.additional], calories: s.calories, protein: s.protein, carbs: s.carbs, fat: s.fat }], rules);
+        if (!v.meals.length) return null;
+        const m = v.meals[0];
+        return { ...s, name: m.name, calories: m.calories, protein: m.protein, carbs: m.carbs, fat: m.fat, uses: m.ingredients.slice(0, s.uses.length), additional: m.ingredients.slice(s.uses.length) };
+      })
+      .filter((s): s is NonNullable<typeof s> => !!s)
+      .map((s) => {
+        const all = [...s.uses, ...s.additional];
+        const uses = all.filter(have);
+        const additional = all.filter((i) => !have(i));
+        const core = all.filter((i) => !findIngredient(i)?.staple);
+        return { ...s, uses, additional, recipeId: input.recipes.find((r) => r.name.toLowerCase() === s.name.toLowerCase())?.id ?? null, coverage: core.length ? Math.round((uses.length / core.length) * 100) / 100 : 0 };
       });
     if (!suggestions.length) return fallback();
     return { suggestions, source: "ai" };

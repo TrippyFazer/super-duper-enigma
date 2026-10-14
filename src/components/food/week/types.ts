@@ -18,7 +18,7 @@ export interface WeekVM {
   prefs: { quickWeekdays: boolean; mealPrep: boolean; highProtein: boolean; reuseIngredients: boolean; notes?: string };
   estimatedCost: number | null;
   actualCost: number | null;
-  summary: { reusePct?: number; rationale?: string; distinctRecipes?: number; coveredByPantry?: number; staplesAssumed?: string[] };
+  summary: { reusePct?: number; rationale?: string; distinctRecipes?: number; coveredByPantry?: number; staplesAssumed?: string[]; reconciled?: { at: string; note: string } | null; ignorePantry?: boolean };
   items: ItemVM[];
   prep: { id: number; status: string; estimatedMinutes: number; items: { name: string; servings: number; minutes: number; supports: string[] }[]; supports: string[] } | null;
   days: { date: string; label: string; meals: { id: number; mealType: string; name: string; calories: number; protein: number; status: string; prepMinutes: number | null }[] }[];

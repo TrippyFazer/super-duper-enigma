@@ -1,3 +1,5 @@
+import { pantryCovers } from "@/food/families";
+import { deriveRules, preferenceScore, recipeExcluded, validateMeal, type FoodRules } from "@/food/rules";
 import type { NutritionPrefs } from "@/services/preferences";
 
 /**
@@ -49,20 +51,23 @@ const QUICK_ADDS: PlannedMeal[] = [
   { index: 0, mealType: "snack", name: "Two hard-boiled eggs", calories: 156, protein: 12, carbs: 1, fat: 10, ingredients: ["eggs"] },
 ];
 
-function excluded(r: RecipeLite, prefs: NutritionPrefs): boolean {
-  const text = `${r.name} ${r.ingredients.join(" ")}`.toLowerCase();
-  for (const d of prefs.dislikes) if (d && text.includes(d.toLowerCase())) return true;
-  const veg = prefs.dietPrefs.includes("vegetarian");
-  const pesc = prefs.dietPrefs.includes("pescatarian");
-  const meat = /\b(chicken|beef|pork|turkey|steak|bacon|ham|lamb)\b/;
-  const fish = /\b(salmon|tuna|shrimp|fish|cod)\b/;
-  if (veg && (meat.test(text) || fish.test(text))) return true;
-  if (pesc && meat.test(text)) return true;
-  if (prefs.dietPrefs.includes("dairy-free") && /\b(cheese|yogurt|milk|butter|ricotta|mozzarella|feta|parmesan|cottage)\b/.test(text)) return true;
-  if (prefs.dietPrefs.includes("gluten-free") && /\b(bread|pasta|tortilla|noodle|bun|granola|oats|flour)\b/.test(text)) return true;
+/** Same rules engine as the weekly planner: hard rules and dislikes exclude; prep time and low-carb are planner limits. */
+function excluded(r: RecipeLite, prefs: NutritionPrefs, rules: FoodRules): boolean {
+  if (recipeExcluded(r, rules)) return true;
   if (prefs.dietPrefs.includes("low-carb") && (r.carbsG ?? 0) > 50) return true;
   if (r.prepTimeMin + r.cookTimeMin > prefs.maxPrepMin + 15) return true;
   return false;
+}
+
+/** Quick adds through the rules: substituted when a rule says so, dropped when it cannot be. */
+export function quickAddsFor(rules: FoodRules): PlannedMeal[] {
+  const out: PlannedMeal[] = [];
+  for (const q of QUICK_ADDS) {
+    if (recipeExcluded(q, rules)) continue;
+    const v = validateMeal(q, rules);
+    if (v.status !== "rejected") out.push(v.meal);
+  }
+  return out;
 }
 
 function rng(seed: number) {
@@ -70,11 +75,18 @@ function rng(seed: number) {
   return () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296);
 }
 
-export function generateTemplateMealPlan(input: { recipes: RecipeLite[]; prefs: NutritionPrefs; calorieTarget: number; proteinTarget: number; onHand?: string[]; seed?: number; recentRecipeIds?: number[] }): GeneratedMealPlan {
+export function generateTemplateMealPlan(input: { recipes: RecipeLite[]; prefs: NutritionPrefs; calorieTarget: number; proteinTarget: number; onHand?: string[]; seed?: number; recentRecipeIds?: number[]; rules?: FoodRules }): GeneratedMealPlan {
   const rand = rng(input.seed ?? Date.now());
-  const pool = input.recipes.filter((r) => r.calories != null && r.proteinG != null && !excluded(r, input.prefs));
+  const rules = input.rules ?? deriveRules(input.prefs);
+  const pool = input.recipes
+    .filter((r) => r.calories != null && r.proteinG != null && !excluded(r, input.prefs, rules))
+    .map((r) => {
+      const v = validateMeal({ name: r.name, ingredients: r.ingredients, calories: r.calories!, protein: r.proteinG!, carbs: r.carbsG ?? 0, fat: r.fatG ?? 0 }, rules);
+      return v.status === "repaired" ? { ...r, ingredients: v.meal.ingredients, calories: v.meal.calories, proteinG: v.meal.protein, carbsG: v.meal.carbs, fatG: v.meal.fat } : r;
+    });
   const recent = new Set(input.recentRecipeIds ?? []);
   const onHand = (input.onHand ?? []).map((s) => s.toLowerCase());
+  const quickAdds = quickAddsFor(rules);
 
   const score = (r: RecipeLite, slot: string) => {
     let s = rand() * 10;
@@ -82,9 +94,9 @@ export function generateTemplateMealPlan(input: { recipes: RecipeLite[]; prefs: 
     else if (r.mealType === "any") s += 10;
     else return -1;
     if (r.isFavorite) s += 6;
-    for (const l of input.prefs.likes) if (l && `${r.name} ${r.ingredients.join(" ")}`.toLowerCase().includes(l.toLowerCase())) s += 5;
+    s += preferenceScore(r, rules) * 1.25;
     if (recent.has(r.id)) s -= 8;
-    if (onHand.length) s += r.ingredients.filter((i) => onHand.some((h) => i.includes(h) || h.includes(i))).length * 4;
+    if (onHand.length) s += r.ingredients.filter((i) => onHand.some((h) => pantryCovers(i, h))).length * 4;
     // Favour protein density relative to the target.
     s += Math.min(10, ((r.proteinG ?? 0) / Math.max(1, r.calories ?? 1)) * 100);
     return s;
@@ -108,9 +120,8 @@ export function generateTemplateMealPlan(input: { recipes: RecipeLite[]; prefs: 
   while (guard++ < 3 && (t.protein < input.proteinTarget - 15 || t.calories < input.calorieTarget - 350)) {
     const needProtein = t.protein < input.proteinTarget - 15;
     const usedSnacks = new Set(meals.filter((m) => m.mealType === "snack").map((m) => m.name));
-    const candidates = QUICK_ADDS.filter((q) => !usedSnacks.has(q.name))
-      .filter((q) => !input.prefs.dislikes.some((d) => d && q.name.toLowerCase().includes(d.toLowerCase())))
-      .filter((q) => !(input.prefs.dietPrefs.includes("dairy-free") && /yogurt|cottage|milk/.test(q.name.toLowerCase())))
+    const candidates = quickAdds
+      .filter((q) => !usedSnacks.has(q.name))
       .filter((q) => t.calories + q.calories <= input.calorieTarget + 150)
       .sort((a, b) => (needProtein ? b.protein - a.protein : b.calories - a.calories));
     const q = candidates[0];

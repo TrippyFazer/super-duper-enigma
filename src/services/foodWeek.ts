@@ -6,14 +6,17 @@ import { addDays, startOfWeek, weekday, type ISODate } from "@/lib/dates";
 import { parseJson, toJson } from "@/lib/json";
 import { buildAiContext } from "@/ai/context";
 import { generateWeek as generateWeekAi, suggestFromPantry as suggestAi } from "@/ai/generate";
-import { CATEGORY_ORDER, canonicalName, findIngredient, type GroceryCategory } from "@/food/ingredients";
+import { CATEGORY_ORDER, findIngredient, type GroceryCategory } from "@/food/ingredients";
+import { ingredientInfo, storageName } from "@/food/families";
+import { reconcile as reconcileCoverage, requirementsFromMeals, type Coverage, type CoverageOverride } from "@/food/reconcile";
+import { deriveRules, resolveIngredientForUser, validateMeal, type FoodRules } from "@/food/rules";
 import type { GeneratedWeek, MealsNeeded, WeekPrefs } from "@/planner/weekTemplates";
 import type { Suggestion } from "@/planner/pantrySuggest";
 import { loadRecipes } from "./loaders";
-import { consumeIngredients, expiringSoon, listPantry, servingsOnHand, setPantryLevel, upsertPantry, type PantryLevel } from "./pantry";
+import { consumeForRecipe, expiringSoon, listPantry, pantryForPlanning, pantryStocks, setPantryLevel, setPantryServings, upsertPantry, type PantryLevel } from "./pantry";
 import { getProfile, type ProfileView } from "./profile";
 import { getAssessment } from "./progression";
-import { dayTotals, getMealPlan, logNutrition, resolveTargets, setPlannedMealStatus, saveMealPlan, type PlannedMealView } from "./nutrition";
+import { dayTotals, getMealPlan, logNutrition, resolveTargets, setPlannedMealStatus, saveMealPlan, updatePlannedMeal, type PlannedMealView } from "./nutrition";
 import { awardXp, voidXpForSource } from "./xp";
 
 // ------------------------------------------------------------- helpers ----
@@ -59,6 +62,8 @@ export interface WeekView extends GroceryWeek {
   prefsParsed: WeekPrefs;
   summaryParsed: WeekSummary;
   items: GroceryItem[];
+  /** the same rows with the reconciliation detail parsed (usedInCounts) */
+  listCounts: { buy: number; partial: number; have: number; confirm: number };
   prep: MealPrepSession | null;
   prepItems: { name: string; servings: number; minutes: number; supports: string[] }[];
   days: { date: ISODate; meals: PlannedMealView[] }[];
@@ -74,6 +79,10 @@ export interface WeekSummary {
   coveredByPantry?: number;
   source?: string;
   replannedFrom?: string;
+  /** set when the plan was built as if the pantry were empty ("don't use my pantry") */
+  ignorePantry?: boolean;
+  /** last reconciliation note ("rice moved to Already have") */
+  reconciled?: { at: string; note: string } | null;
 }
 
 export function getWeek(weekStart: ISODate): WeekView | null {
@@ -107,8 +116,18 @@ function viewWeek(row: GroceryWeek): WeekView {
     prep,
     prepItems: prep ? parseJson(prep.items, []) : [],
     days,
+    listCounts: { buy: items.filter((i) => !i.coveredByPantry && !i.skipped && (i.coverage === "none" || i.coverage === "stock-up" || i.coverage == null)).length, partial: items.filter((i) => i.coverage === "partial" && !i.skipped).length, have: items.filter((i) => i.coveredByPantry).length, confirm: items.filter((i) => i.coverage === "confirm" && !i.skipped).length },
     totals: { estimated: round2(estimated), actual: round2(actual), purchased: items.filter((i) => i.purchased).length, itemCount: items.filter((i) => !i.coveredByPantry).length, remaining: round2(row.budget - (actual || estimated)) },
   };
+}
+
+/** The week's planned meals that still need ingredients (planned / prepared; eaten ones already consumed the pantry). */
+function pendingMeals(wk: WeekView): { name: string; ingredients: string[]; leftover: boolean }[] {
+  return wk.days.flatMap((d) => d.meals).filter((m) => m.status === "planned" || m.status === "prepared").map((m) => ({ name: m.name, ingredients: m.ingredientsParsed, leftover: /^leftover /i.test(m.name) || /leftover/i.test(m.notes ?? "") }));
+}
+
+export function currentRules(): FoodRules {
+  return deriveRules(getProfile().preferences.nutrition);
 }
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -172,8 +191,9 @@ export async function generateWeekPlan(weekId: number, opts: { force?: boolean; 
   const scale = days / Math.max(1, wk.spanDays);
   const needed: MealsNeeded = scale === 1 ? wk.mealsNeededParsed : { breakfast: Math.max(1, Math.round(wk.mealsNeededParsed.breakfast * scale)), lunch: Math.max(1, Math.round(wk.mealsNeededParsed.lunch * scale)), dinner: Math.max(1, Math.round(wk.mealsNeededParsed.dinner * scale)), snacks: wk.mealsNeededParsed.snacks, eatingOut: Math.round(wk.mealsNeededParsed.eatingOut * scale) };
   const recipes = loadRecipes().map((r) => ({ id: r.id, name: r.name, mealType: r.mealType, calories: r.calories, proteinG: r.proteinG, carbsG: r.carbsG, fatG: r.fatG, tags: r.tagsParsed, ingredients: r.ingredientsParsed, prepTimeMin: r.prepTimeMin, cookTimeMin: r.cookTimeMin, isFavorite: r.isFavorite }));
-  const pantry = opts.ignorePantry ? [] : listPantry().map((p) => ({ name: p.name, servings: servingsOnHand(p) }));
+  const pantry = opts.ignorePantry ? [] : pantryForPlanning(profile.today);
   const ctx = buildAiContext(profile, profile.preferences, getAssessment(profile));
+  const rules = deriveRules(profile.preferences.nutrition);
   const recent = db
     .select({ recipeId: plannedMeals.recipeId })
     .from(plannedMeals)
@@ -181,12 +201,12 @@ export async function generateWeekPlan(weekId: number, opts: { force?: boolean; 
     .all()
     .map((r) => r.recipeId)
     .filter((x): x is number => x != null);
-  const r = await generateWeekAi(ctx, { weekStart: from, days, recipes, prefs: profile.preferences.nutrition, week: wk.prefsParsed, mealsNeeded: needed, calorieTarget: wk.calorieTarget, proteinTarget: wk.proteinTarget, budget: opts.budget ?? wk.budget, budgetMode: wk.budgetMode as "budget", pantry, seed: Number(from.replace(/-/g, "")) + (opts.force ? Date.now() % 997 : 0), recentRecipeIds: recent, force: opts.force });
-  applyGeneratedWeek(wk, r.plan, r.source, { fromDate: from, days, today: profile.today, replan: opts.replan });
+  const r = await generateWeekAi(ctx, { weekStart: from, days, recipes, prefs: profile.preferences.nutrition, week: wk.prefsParsed, mealsNeeded: needed, calorieTarget: wk.calorieTarget, proteinTarget: wk.proteinTarget, budget: opts.budget ?? wk.budget, budgetMode: wk.budgetMode as "budget", pantry, rules, seed: Number(from.replace(/-/g, "")) + (opts.force ? Date.now() % 997 : 0), recentRecipeIds: recent, force: opts.force });
+  applyGeneratedWeek(wk, r.plan, r.source, { fromDate: from, days, today: profile.today, replan: opts.replan, ignorePantry: opts.ignorePantry });
   return { week: getWeekById(weekId)!, source: r.source, error: r.error };
 }
 
-export function applyGeneratedWeek(wk: WeekView, plan: GeneratedWeek, source: "ai" | "template", opts: { fromDate?: ISODate; days?: number; today?: ISODate; replan?: boolean } = {}) {
+export function applyGeneratedWeek(wk: WeekView, plan: GeneratedWeek, source: "ai" | "template", opts: { fromDate?: ISODate; days?: number; today?: ISODate; replan?: boolean; ignorePantry?: boolean } = {}) {
   const db = getDb();
   const from = opts.fromDate ?? wk.weekStart;
   const nDays = opts.days ?? wk.spanDays;
@@ -213,22 +233,185 @@ export function applyGeneratedWeek(wk: WeekView, plan: GeneratedWeek, source: "a
       { weekId: wk.id },
     );
   }
-  // Shopping list: replace un-purchased rows, keep purchased ones (shopping may be in progress).
-  db.delete(groceryItems).where(and(eq(groceryItems.weekId, wk.id), eq(groceryItems.purchased, false))).run();
-  for (const it of plan.shoppingList) {
-    db.insert(groceryItems).values({ weekId: wk.id, name: it.name, category: it.category, qty: it.qty, unit: it.unit, estPrice: it.estPrice, usedIn: toJson(it.usedIn), coveredByPantry: it.coveredByPantry, note: it.note ?? null }).run();
-  }
   // Prep session: the day before the plan starts when planning ahead, otherwise today (a plan that starts today preps today).
   const today = opts.today ?? wk.weekStart;
   const prepDate = from > today ? addDays(from, -1) : today;
   db.delete(mealPrepSessions).where(and(eq(mealPrepSessions.weekId, wk.id), eq(mealPrepSessions.status, "planned"))).run();
   if (plan.prepPlan.length) db.insert(mealPrepSessions).values({ weekId: wk.id, date: prepDate, items: toJson(plan.prepPlan), estimatedMinutes: plan.prepMinutes, supports: toJson([...new Set(plan.prepPlan.flatMap((p) => p.supports))]) }).run();
   const prev = wk.summaryParsed;
-  const summary: WeekSummary = { reusePct: plan.reusePct, staplesAssumed: plan.staplesAssumed, rationale: partial ? `Replanned from ${from}: ${plan.rationale}` : plan.rationale, distinctRecipes: plan.distinctRecipes, coveredByPantry: plan.shoppingList.filter((i) => i.coveredByPantry).length, source, leftoversCarried: prev.leftoversCarried, replannedFrom: partial ? from : undefined };
+  const summary: WeekSummary = { reusePct: plan.reusePct, staplesAssumed: plan.staplesAssumed, rationale: partial ? `Replanned from ${from}: ${plan.rationale}` : plan.rationale, distinctRecipes: plan.distinctRecipes, coveredByPantry: plan.shoppingList.filter((i) => i.coveredByPantry).length, source, leftoversCarried: prev.leftoversCarried, replannedFrom: partial ? from : undefined, ignorePantry: opts.ignorePantry ?? (partial ? prev.ignorePantry : undefined) };
   // A replan after shopping keeps the week "shopped"; otherwise it is (re)planned.
   const status = partial && (wk.status === "shopped" || wk.status === "reviewed") ? wk.status : "planned";
   const estimated = partial ? round2((wk.actualCost ?? 0) + plan.estimatedCost) : plan.estimatedCost;
   db.update(groceryWeeks).set({ status, source, estimatedCost: estimated, summary: toJson(summary) }).where(eq(groceryWeeks.id, wk.id)).run();
+  // The shopping list is derived: planned meals vs pantry, never copied from the plan.
+  reconcileShoppingList(wk.id, { keepOverrides: partial });
+}
+
+// ------------------------------------------------------- reconciliation ----
+/**
+ * RECONCILIATION ENGINE — separate from meal planning. Re-runs
+ * requirements (from the week's pending planned meals, rules applied) against
+ * the pantry and rewrites the un-purchased rows of the list. Meals are never
+ * regenerated here. Purchased rows and rows the user added by hand are kept;
+ * manual overrides ("I already have this", "buy anyway") survive.
+ */
+export function reconcileShoppingList(weekId: number, opts: { keepOverrides?: boolean; note?: string } = {}): { week: WeekView; changes: string[] } {
+  const db = getDb();
+  const wk = getWeekById(weekId);
+  if (!wk) throw new Error("Week not found");
+  const rules = currentRules();
+  const reqs = requirementsFromMeals(pendingMeals(wk), rules);
+  const existing = wk.items;
+  const overrides: Record<string, CoverageOverride> = {};
+  if (opts.keepOverrides ?? true) for (const it of existing) if ((it.coverage === "manual" || it.coverage === "stock-up") && it.canonical) overrides[it.canonical] = it.coverage;
+  const stock = wk.summaryParsed.ignorePantry ? [] : pantryStocks();
+  const r = reconcileCoverage(reqs, stock, { overrides });
+  const byKey = new Map(existing.filter((i) => i.canonical).map((i) => [i.canonical!, i]));
+  const seen = new Set<number>();
+  const changes: string[] = [];
+  for (const c of r.items) {
+    const cur = byKey.get(c.name);
+    const values = rowFor(wk.id, c);
+    if (cur) {
+      seen.add(cur.id);
+      if (cur.purchased) continue; // bought is bought
+      const before = cur.coveredByPantry ? "have" : cur.coverage === "partial" ? "partial" : cur.coverage === "confirm" ? "confirm" : "buy";
+      const after = values.coveredByPantry ? "have" : values.coverage === "partial" ? "partial" : values.coverage === "confirm" ? "confirm" : "buy";
+      if (before !== after) changes.push(`${c.name}: ${before} → ${after}`);
+      else if (Math.abs(cur.qty - values.qty) >= 0.5) changes.push(`${c.name}: ${cur.qty} → ${values.qty} ${values.unit}`);
+      db.update(groceryItems).set(values).where(eq(groceryItems.id, cur.id)).run();
+    } else {
+      db.insert(groceryItems).values(values).run();
+      changes.push(`${c.name}: added`);
+    }
+  }
+  // Rows the plan no longer needs: drop un-purchased derived rows (keep hand-added ones: no canonical).
+  for (const it of existing) if (it.canonical && !seen.has(it.id) && !it.purchased) {
+    db.delete(groceryItems).where(eq(groceryItems.id, it.id)).run();
+    changes.push(`${it.name}: removed`);
+  }
+  recomputeActual(wk.id);
+  const summary: WeekSummary = { ...wk.summaryParsed, staplesAssumed: r.staples, coveredByPantry: r.counts.have, reconciled: changes.length ? { at: new Date().toISOString(), note: opts.note ?? changes.slice(0, 3).join(" · ") } : (wk.summaryParsed.reconciled ?? null) };
+  db.update(groceryWeeks).set({ summary: toJson(summary) }).where(eq(groceryWeeks.id, wk.id)).run();
+  return { week: getWeekById(wk.id)!, changes };
+}
+
+function rowFor(weekId: number, c: Coverage) {
+  const override = c.override;
+  return {
+    weekId,
+    name: c.name,
+    category: c.category,
+    qty: c.qty,
+    unit: c.unit,
+    estPrice: c.estPrice,
+    usedIn: toJson(c.usedIn.map((u) => u.name)),
+    usedInCounts: toJson(c.usedIn),
+    coveredByPantry: c.status === "full",
+    note: c.why,
+    requiredServings: c.required,
+    onHandServings: c.onHand,
+    coverage: override ?? c.status,
+    canonical: c.name,
+    substitutedFrom: c.substitutedFrom,
+  };
+}
+
+/** The pantry changed: reconcile the plan that is being shopped for, without touching its meals. */
+export function onPantryChanged(today: ISODate): { weekId: number; changes: string[] } | null {
+  const row = activeWeekRow(today) ?? nextWeekRow(today);
+  if (!row || row.status === "reviewed") return null;
+  if (row.status === "planning") return null;
+  const r = reconcileShoppingList(row.id);
+  return { weekId: row.id, changes: r.changes };
+}
+
+/** "I already have this" (manual) / "Buy anyway" (stock-up) / clear. Manual also records the pantry so later runs agree. */
+export function setCoverageOverride(itemId: number, override: CoverageOverride): WeekView | null {
+  const db = getDb();
+  const it = db.select().from(groceryItems).where(eq(groceryItems.id, itemId)).get();
+  if (!it) return null;
+  if (override === "manual" && it.requiredServings) {
+    const cur = listPantry({ includeEmpty: true }).find((p) => p.name === (it.canonical ?? it.name));
+    if (cur) setPantryServings(cur.id, Math.max(it.requiredServings, cur.qty != null ? 0 : it.requiredServings));
+    else {
+      const row = upsertPantry({ name: it.canonical ?? it.name, level: "some", source: "manual" });
+      setPantryServings(row.id, it.requiredServings);
+    }
+  }
+  db.update(groceryItems).set({ coverage: override ?? (it.coveredByPantry ? "full" : "none") }).where(eq(groceryItems.id, itemId)).run();
+  return reconcileShoppingList(it.weekId).week;
+}
+
+/**
+ * Quick pantry check for a vague row ("Some"): yes = enough for the plan,
+ * low = keep what's there and buy the difference, out = buy it all.
+ */
+export function pantryCheck(itemId: number, answer: "yes" | "low" | "out"): WeekView | null {
+  const db = getDb();
+  const it = db.select().from(groceryItems).where(eq(groceryItems.id, itemId)).get();
+  if (!it) return null;
+  const name = it.canonical ?? it.name;
+  const stock = pantryStocks().filter((p) => p.level !== "none" && ingredientInfo(p.name).family === ingredientInfo(name).family && (ingredientInfo(p.name).family != null || p.name === name));
+  const target = stock.find((p) => p.name === name) ?? stock[0];
+  const required = it.requiredServings ?? 1;
+  if (answer === "yes") {
+    if (target?.id) setPantryServings(target.id, required);
+    else setPantryServings(upsertPantry({ name, level: "lot", source: "manual" }).id, required);
+  } else if (answer === "low") {
+    if (target?.id) setPantryServings(target.id, Math.max(0.5, Math.round(required * 0.3 * 10) / 10));
+    db.update(groceryItems).set({ coverage: null }).where(eq(groceryItems.id, itemId)).run();
+  } else if (target?.id) setPantryLevel(target.id, "none");
+  return reconcileShoppingList(it.weekId).week;
+}
+
+/**
+ * Shopping substitution: swap a list row for another ingredient. The food
+ * rules are checked, the planned meals that use the old ingredient are updated
+ * so the pantry and the recipes agree, and the substitute is what gets bought.
+ */
+export function replaceGroceryItem(itemId: number, replacement: string): { ok: true; week: WeekView; name: string } | { ok: false; error: string } {
+  const db = getDb();
+  const it = db.select().from(groceryItems).where(eq(groceryItems.id, itemId)).get();
+  if (!it) return { ok: false, error: "Item not found" };
+  const rules = currentRules();
+  const r = resolveIngredientForUser(replacement, rules);
+  if (r.status === "forbidden") return { ok: false, error: `${replacement} breaks a food rule (${r.reason})` };
+  const name = storageName(r.name) || r.name.toLowerCase();
+  const old = it.canonical ?? it.name;
+  const wk = getWeekById(it.weekId)!;
+  for (const d of wk.days) for (const m of d.meals) {
+    if (m.status !== "planned" && m.status !== "prepared") continue;
+    const next = m.ingredientsParsed.map((ing) => (storageName(ing) === old ? ing.replace(new RegExp(ing.replace(/^[\d.,/ ]*(lb|lbs|oz|g|kg|cups?|tbsp|tsp|ml|l|each|dozen)?\s*/i, "").replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&")), name) : ing));
+    if (next.some((x, i) => x !== m.ingredientsParsed[i])) updatePlannedMeal(m.id, { ingredients: next, notes: [m.notes, `${old} → ${name}`].filter(Boolean).join(" · ") });
+  }
+  db.update(groceryItems).set({ name, canonical: name, substitutedFrom: old, category: findIngredient(name)?.category ?? it.category, unit: findIngredient(name)?.unit ?? it.unit, coverage: it.coverage === "manual" ? null : it.coverage }).where(eq(groceryItems.id, itemId)).run();
+  return { ok: true, week: reconcileShoppingList(it.weekId, { note: `${old} replaced with ${name}` }).week, name };
+}
+
+/**
+ * The rules changed ("don't recommend regular milk"): repair the week's
+ * pending planned meals in place with the same validator every planner uses,
+ * then reconcile the list. Meals that cannot be repaired are left (the user
+ * can replace them); nothing is regenerated.
+ */
+export function applyRulesToWeek(weekId: number): { repaired: number; blocked: string[] } {
+  const wk = getWeekById(weekId);
+  if (!wk) return { repaired: 0, blocked: [] };
+  const rules = currentRules();
+  let repaired = 0;
+  const blocked: string[] = [];
+  for (const d of wk.days) for (const m of d.meals) {
+    if (m.status !== "planned" && m.status !== "prepared") continue;
+    const v = validateMeal({ name: m.name, ingredients: m.ingredientsParsed, calories: m.calories, protein: m.protein, carbs: m.carbs, fat: m.fat, notes: m.notes ?? undefined }, rules);
+    if (v.status === "repaired") {
+      updatePlannedMeal(m.id, { name: v.meal.name, ingredients: v.meal.ingredients, calories: v.meal.calories, protein: v.meal.protein, carbs: v.meal.carbs, fat: v.meal.fat, notes: v.meal.notes ?? null });
+      repaired++;
+    } else if (v.status === "rejected") blocked.push(m.name);
+  }
+  reconcileShoppingList(weekId, { note: repaired ? `${repaired} meal${repaired === 1 ? "" : "s"} adjusted to your food rules` : undefined });
+  return { repaired, blocked: [...new Set(blocked)] };
 }
 
 // --------------------------------------------------------- shopping list ----
@@ -252,7 +435,7 @@ export function addGroceryItem(weekId: number, input: { name: string; qty?: numb
   const def = findIngredient(input.name);
   const row = getDb()
     .insert(groceryItems)
-    .values({ weekId, name: canonicalName(input.name) || input.name.toLowerCase(), category: input.category ?? def?.category ?? "other", qty: input.qty ?? 1, unit: input.unit ?? def?.unit ?? "each", estPrice: input.estPrice ?? (def ? round2(def.price * (input.qty ?? 1)) : null), usedIn: "[]" })
+    .values({ weekId, name: storageName(input.name) || input.name.toLowerCase(), category: input.category ?? def?.category ?? "other", qty: input.qty ?? 1, unit: input.unit ?? def?.unit ?? "each", estPrice: input.estPrice ?? (def ? round2(def.price * (input.qty ?? 1)) : null), usedIn: "[]", coverage: "stock-up", note: "Added by you" })
     .returning()
     .get();
   recomputeActual(weekId);
@@ -279,9 +462,13 @@ export function finishShopping(weekId: number, today: ISODate): WeekView {
   const db = getDb();
   const wk = getWeekById(weekId);
   if (!wk) throw new Error("Week not found");
+  // Purchased rows → pantry with the ACTUAL quantity (skipped and un-bought rows never do), stored under the
+  // canonical variant ("lactose-free milk"), merged into an existing row rather than duplicated.
   for (const it of wk.items) {
-    if (!it.purchased) continue;
-    upsertPantry({ name: it.name, qty: it.actualQty ?? it.qty, unit: it.unit, purchasedAt: today, source: "grocery", add: true });
+    if (!it.purchased || it.skipped) continue;
+    const qty = it.actualQty ?? it.qty;
+    if (qty <= 0) continue;
+    upsertPantry({ name: it.canonical ?? it.name, qty, unit: it.unit, purchasedAt: today, source: "grocery", add: true, product: it.substitutedFrom ? `bought instead of ${it.substitutedFrom}` : undefined });
   }
   recomputeActual(weekId);
   db.update(groceryWeeks).set({ status: "shopped", shoppedAt: new Date().toISOString() }).where(eq(groceryWeeks.id, weekId)).run();
@@ -298,8 +485,8 @@ export function reopenShopping(weekId: number): WeekView {
   if (!wk) throw new Error("Week not found");
   for (const it of wk.items) {
     if (!it.purchased) continue;
-    const p = listPantry({ includeEmpty: true }).find((x) => x.name === it.name);
-    if (p && p.qty != null) upsertPantry({ name: it.name, qty: Math.max(0, p.qty - (it.actualQty ?? it.qty)), unit: p.unit });
+    const p = listPantry({ includeEmpty: true }).find((x) => x.name === (it.canonical ?? it.name));
+    if (p && p.qty != null) upsertPantry({ name: p.name, qty: Math.max(0, p.qty - (it.actualQty ?? it.qty)), unit: p.unit });
   }
   db.update(groceryWeeks).set({ status: "planned", shoppedAt: null }).where(eq(groceryWeeks.id, weekId)).run();
   return getWeekById(weekId)!;
@@ -404,19 +591,29 @@ export async function whatCanIEat(opts: { mealType?: "breakfast" | "lunch" | "di
   const wk = activeWeek(today);
   const recent = getDb().select({ name: nutritionEntries.name }).from(nutritionEntries).where(gte(nutritionEntries.date, addDays(today, -3))).all().map((r) => r.name);
   const ctx = buildAiContext(profile, profile.preferences, getAssessment(profile));
-  const r = await suggestAi(ctx, { recipes, pantry, expiring, remainingCalories: targets.calories - totals.calories, remainingProtein: targets.protein - totals.protein, maxMinutes: opts.minutes ?? profile.preferences.nutrition.maxPrepMin, dislikes: profile.preferences.nutrition.dislikes, mealType: opts.mealType ?? "dinner", budgetRemaining: wk?.totals.remaining ?? null, recentMeals: recent });
+  const r = await suggestAi(ctx, { recipes, pantry, expiring, remainingCalories: targets.calories - totals.calories, remainingProtein: targets.protein - totals.protein, maxMinutes: opts.minutes ?? profile.preferences.nutrition.maxPrepMin, dislikes: profile.preferences.nutrition.dislikes, mealType: opts.mealType ?? "dinner", budgetRemaining: wk?.totals.remaining ?? null, recentMeals: recent, rules: deriveRules(profile.preferences.nutrition) });
   return { ...r, pantry, expiring, remainingCalories: targets.calories - totals.calories, remainingProtein: targets.protein - totals.protein };
 }
 
 /** "COOK THIS": logs the cooked meal (nutrition + cooking rank) and ticks the used ingredients down in the pantry. */
-export function cookSuggestion(s: { name: string; calories: number; protein: number; carbs: number; fat: number; uses: string[]; recipeId: number | null; mealType?: string }, profile: ProfileView = getProfile()) {
+export function cookSuggestion(s: { name: string; calories: number; protein: number; carbs: number; fat: number; uses: string[]; recipeId: number | null; mealType?: string; servings?: number }, profile: ProfileView = getProfile()) {
   const targets = resolveTargets(profile.preferences.nutrition, profile);
   const today = profile.today;
   const plan = getMealPlan(today);
   const slot = plan?.meals.find((m) => m.mealType === (s.mealType ?? "dinner") && (m.status === "planned" || m.status === "prepared"));
-  const r = logNutrition({ date: today, mealType: s.mealType ?? "dinner", name: s.name, calories: s.calories, protein: s.protein, carbs: s.carbs, fat: s.fat, source: "recipe", recipeId: s.recipeId, cooked: true, replacesPlannedMealId: slot && slot.name !== s.name ? slot.id : null, plannedMealId: slot && slot.name === s.name ? slot.id : null }, { proteinTarget: targets.protein, calorieTarget: targets.calories, unsafeTargets: targets.unsafe });
-  consumeIngredients(s.uses, 1);
+  const r = logNutrition({ date: today, mealType: s.mealType ?? "dinner", name: s.name, calories: s.calories, protein: s.protein, carbs: s.carbs, fat: s.fat, source: "recipe", recipeId: s.recipeId, cooked: true, skipPantry: true, replacesPlannedMealId: slot && slot.name !== s.name ? slot.id : null, plannedMealId: slot && slot.name === s.name ? slot.id : null }, { proteinTarget: targets.protein, calorieTarget: targets.calories, unsafeTargets: targets.unsafe });
+  // Pantry consumption = the recipe's requirement × servings cooked (a double batch takes double).
+  const recipe = s.recipeId ? loadRecipes().find((x) => x.id === s.recipeId) : null;
+  consumeForRecipe(recipe?.ingredientsParsed?.length ? recipe.ingredientsParsed : s.uses, s.servings ?? 1);
+  onPantryChanged(today);
   return r;
+}
+
+/** Cooking a planned meal (or any recipe) consumes the pantry by requirement × servings. */
+export function consumeForCooking(ingredients: string[], servings = 1, today: ISODate = getProfile().today) {
+  const consumed = consumeForRecipe(ingredients, servings);
+  const r = onPantryChanged(today);
+  return { consumed, reconciled: r };
 }
 
 export const GROCERY_CATEGORIES = CATEGORY_ORDER;

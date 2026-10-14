@@ -1,9 +1,10 @@
 import { and, desc, eq, gte, inArray, lte, ne, sql } from "drizzle-orm";
 import { getDb } from "@/db/client";
-import { mealPlans, meals, nutritionEntries, plannedMeals, savedFoods, type MealPlan, type NutritionEntry, type PlannedMeal as PlannedMealRow, type SavedFood } from "@/db/schema";
+import { mealPlans, meals, nutritionEntries, plannedMeals, recipes, savedFoods, type MealPlan, type NutritionEntry, type PlannedMeal as PlannedMealRow, type SavedFood } from "@/db/schema";
 import { addDays, lastNDays, type ISODate } from "@/lib/dates";
 import { parseJson, toJson } from "@/lib/json";
 import type { GeneratedMealPlan, PlannedMeal } from "@/planner/mealTemplates";
+import { consumeForRecipe } from "./pantry";
 import { estimateTargets, SAFE_MIN_CALORIES, type NutritionPrefs } from "./preferences";
 import { awardXp, voidXpByKey, voidXpForSource, type XpAward } from "./xp";
 
@@ -84,8 +85,12 @@ export interface LogInput {
   savedFoodId?: number | null;
   isEstimate?: boolean;
   venue?: string | null;
-  /** If true, also logs a cooked meal (counts toward the cooking rank). */
+  /** If true, also logs a cooked meal (counts toward the cooking rank) and consumes the pantry. */
   cooked?: boolean;
+  /** servings cooked (a double batch consumes double) */
+  servings?: number;
+  /** the caller handles pantry consumption itself */
+  skipPantry?: boolean;
 }
 
 export interface XpCtx {
@@ -126,6 +131,13 @@ export function logNutrition(input: LogInput, ctx: XpCtx): { entry: NutritionEnt
     db.update(nutritionEntries).set({ mealId }).where(eq(nutritionEntries.id, entry0.id)).run();
     const a = awardXp("meal_cooked", input.date, { suffix: `n${m.id}`, source: { type: "meal", id: m.id } });
     if (a.awarded) xp.push(a);
+    // Cooking consumes the pantry by the recipe's requirement × servings (the planned meal's ingredients when no recipe).
+    if (!input.skipPantry) {
+      const recipe = input.recipeId ? db.select().from(recipes).where(eq(recipes.id, input.recipeId)).get() : null;
+      const planned = input.plannedMealId ? db.select().from(plannedMeals).where(eq(plannedMeals.id, input.plannedMealId)).get() : null;
+      const ings = recipe ? parseJson<string[]>(recipe.ingredients, []) : planned ? parseJson<unknown[]>(planned.ingredients, []).map((x) => (typeof x === "string" ? x : ((x as { name?: string })?.name ?? ""))).filter(Boolean) : [];
+      if (ings.length) consumeForRecipe(ings, input.servings ?? 1);
+    }
   }
   const entry = { ...entry0, mealId };
   const src = { type: "nutrition" as const, id: entry.id };

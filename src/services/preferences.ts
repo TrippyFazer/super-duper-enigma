@@ -21,8 +21,19 @@ export interface FitnessPrefs {
   trainingDays: number[];
 }
 
+/** Rich food rule (see src/food/rules.ts). Broad dietPrefs keep working and become hard tag rules. */
+export interface FoodRulePref {
+  id: string;
+  kind: "allergy" | "intolerance" | "religious" | "avoid" | "prefer-substitute" | "prefer" | "dislike";
+  target: string;
+  substitute?: string | null;
+  note?: string;
+}
+
 export interface NutritionPrefs {
   goal: NutritionGoal;
+  /** structured restrictions / intolerances / substitutions (alongside dietPrefs, likes, dislikes) */
+  foodRules: FoodRulePref[];
   calorieTarget: number | null;
   proteinTarget: number | null;
   carbTarget: number | null;
@@ -123,7 +134,7 @@ export interface Preferences {
 
 export const DEFAULT_PREFERENCES: Preferences = {
   fitness: { goal: "general", experience: "beginner", daysPerWeek: 3, equipment: ["dumbbell", "bodyweight"], workoutLengthMin: 45, injuries: "", preferences: "", trainingDays: [] },
-  nutrition: { goal: "maintain", calorieTarget: null, proteinTarget: null, carbTarget: null, fatTarget: null, dietPrefs: [], dislikes: [], likes: [], mealsPerDay: 3, maxPrepMin: 30, budget: "medium" },
+  nutrition: { goal: "maintain", foodRules: [], calorieTarget: null, proteinTarget: null, carbTarget: null, fatTarget: null, dietPrefs: [], dislikes: [], likes: [], mealsPerDay: 3, maxPrepMin: 30, budget: "medium" },
   questFrequency: "normal",
   notifications: { quest: true, workout: true, meals: true, level: true, rank: true, achievement: true, sobriety: true, review: true, browser: false, morningMotivation: true, windDown: true, windDownLeadMin: 0, workoutReminder: false, workoutReminderTime: "17:00", mealPrepReminder: true, weeklyPlanning: true, weeklyPlanningTime: "10:00" },
   ai: { provider: "none", model: null, baseUrl: null },

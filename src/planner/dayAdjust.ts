@@ -1,3 +1,5 @@
+import { pantryCovers } from "@/food/families";
+import { recipeExcluded, validateMeal, type FoodRules } from "@/food/rules";
 import type { RecipeLite } from "./mealTemplates";
 
 /**
@@ -28,11 +30,17 @@ const SNACKS = [
   { name: "Light salad with chicken", calories: 320, protein: 35, carbs: 10, fat: 14, ingredients: ["chicken breast", "lettuce", "olive oil"] },
 ];
 
-export function proposeDayAdjustment(input: { remaining: RemainingSlot[]; remainingCalories: number; remainingProtein: number; recipes: RecipeLite[]; pantry: string[]; maxPrepMin: number; dislikes: string[] }): AdjustProposal | null {
+export function proposeDayAdjustment(input: { remaining: RemainingSlot[]; remainingCalories: number; remainingProtein: number; recipes: RecipeLite[]; pantry: string[]; maxPrepMin: number; dislikes: string[]; rules?: FoodRules | null }): AdjustProposal | null {
   const remaining = [...input.remaining].sort((a, b) => a.slot - b.slot);
   if (!remaining.length) return null;
-  const pantry = input.pantry.map((p) => p.toLowerCase());
-  const covered = (ings: string[]) => (ings.length ? ings.filter((i) => pantry.some((p) => i.toLowerCase().includes(p) || p.includes(i.toLowerCase()))).length / ings.length : 0);
+  const covered = (ings: string[]) => (ings.length ? ings.filter((i) => input.pantry.some((p) => pantryCovers(i, p))).length / ings.length : 0);
+  const rules = input.rules ?? null;
+  const allowed = (r: { name: string; ingredients: string[] }) => !rules || !recipeExcluded(r, rules);
+  const repair = <T extends { name: string; ingredients: string[]; calories: number; protein: number; carbs: number; fat: number }>(m: T): T | null => {
+    if (!rules) return m;
+    const v = validateMeal(m, rules);
+    return v.status === "rejected" ? null : v.meal;
+  };
   let calLeft = input.remainingCalories;
   let proLeft = input.remainingProtein;
   const meals: AdjustProposal["meals"] = [];
@@ -44,14 +52,15 @@ export function proposeDayAdjustment(input: { remaining: RemainingSlot[]; remain
     if (slot.mealType !== "snack") {
       const cands = input.recipes
         .filter((r) => r.calories != null && r.proteinG != null && (r.mealType === slot.mealType || r.mealType === "any") && r.prepTimeMin + r.cookTimeMin <= input.maxPrepMin + 10)
-        .filter((r) => !input.dislikes.some((d) => d && `${r.name} ${r.ingredients.join(" ")}`.toLowerCase().includes(d.toLowerCase())))
+        .filter((r) => !input.dislikes.some((d) => d && `${r.name} ${r.ingredients.join(" ")}`.toLowerCase().includes(d.toLowerCase())) && allowed(r))
         .map((r) => ({ r, score: -Math.abs((r.calories ?? 0) - budget) / 50 + Math.min(10, ((r.proteinG ?? 0) / proNeed) * 5) + covered(r.ingredients) * 12 }))
         .sort((a, b) => b.score - a.score);
       const best = cands[0]?.r;
-      if (best) pick = { replacesId: slot.id, replacesSlot: slot.slot, mealType: slot.mealType, name: best.name, calories: best.calories!, protein: best.proteinG!, carbs: best.carbsG ?? 0, fat: best.fatG ?? 0, ingredients: best.ingredients, recipeId: best.id, notes: covered(best.ingredients) >= 0.6 ? "Mostly from what you have." : "" };
+      if (best) pick = repair({ replacesId: slot.id, replacesSlot: slot.slot, mealType: slot.mealType, name: best.name, calories: best.calories!, protein: best.proteinG!, carbs: best.carbsG ?? 0, fat: best.fatG ?? 0, ingredients: best.ingredients, recipeId: best.id, notes: covered(best.ingredients) >= 0.6 ? "Mostly from what you have." : "" });
     }
     if (!pick) {
-      const s = [...SNACKS].sort((a, b) => Math.abs(a.calories - budget) + (proLeft > 20 ? (30 - a.protein) : 0) - (Math.abs(b.calories - budget) + (proLeft > 20 ? (30 - b.protein) : 0)))[0];
+      const s = SNACKS.filter(allowed).map((x) => repair(x)).filter((x): x is NonNullable<typeof x> => !!x).sort((a, b) => Math.abs(a.calories - budget) + (proLeft > 20 ? (30 - a.protein) : 0) - (Math.abs(b.calories - budget) + (proLeft > 20 ? (30 - b.protein) : 0)))[0];
+      if (!s) continue;
       pick = { replacesId: slot.id, replacesSlot: slot.slot, mealType: slot.mealType, name: s.name, calories: s.calories, protein: s.protein, carbs: s.carbs, fat: s.fat, ingredients: s.ingredients, recipeId: null, notes: "" };
     }
     meals.push(pick);

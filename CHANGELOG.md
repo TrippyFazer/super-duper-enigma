@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.6.0 — 2026-10-14 · "Never contradict the pantry" (food loop)
+
+Focused pass on PANTRY · GROCERY LIST · INGREDIENT REQUIREMENTS · DIETARY RULES · the SHOPPING → PANTRY → COOKING loop. No redesign. Details in `docs/food-loop.md`.
+
+* **Food rules, not keywords** (`src/food/rules.ts`): structured restrictions & intolerances in Settings → Nutrition (+ Add: ingredient or group, *Avoid completely* / *Prefer substitute* / *No preference*, preferred substitute). Semantics: hard restriction / avoid / preferred substitute / preference / dislike. "Avoid regular milk, prefer lactose-free" keeps dairy, makes the protein shake protein powder + lactose-free milk, and never needs correcting again. Legacy diet chips, likes and dislikes keep working through the same engine.
+* **One rules engine everywhere**: template week, template day, snacks and quick adds, pantry suggestions, day adjustments, **and every AI output** (normalize → substitute → validate; repaired with adjusted macros, labelled "estimated" when unknown; rejected meals replaced). The AI prompt receives the rules as structured MUST / avoid / prefer lines.
+* **Ingredient families & variants** (`src/food/families.ts`): jasmine rice satisfies "rice"; regular milk never satisfies "lactose-free milk"; bread never satisfies "gluten-free bread". Catalog gained the variants (lactose-free milk, oat/almond/soy milk, jasmine/basmati/brown rice, gluten-free bread/pasta, corn tortilla…). Unit conversion for lb/oz/g/kg, cup/tbsp/tsp/ml/L, each/dozen and purchase units.
+* **Quantity-aware list** (`src/food/reconcile.ts`): required / on hand / to buy in servings and purchase units. Sections **Check your pantry** (Some → "Need ~4 servings. Enough? Yes / Low / Out"), **Buy**, **Partial · buy the difference**, **Already have** — every row says *used in*, *have*, *buy*. "A lot" is trusted unless the plan needs unusually much.
+* **Reconciliation engine, separate from meal planning**: a pantry change (add, level, quantity, delete, cooking) re-runs requirements vs pantry for the current plan and updates the list without regenerating meals; the list shows what moved. *I already have this*, *Buy anyway*, *Replace item* (rules checked, recipes updated, substitute goes to the pantry), *Don't recommend this* (avoid / use a substitute → rule saved, pending meals repaired in place).
+* **Shopping → pantry**: purchased rows only, actual quantity, canonical variant, merged into existing rows; skipped rows never reach the pantry. **Cooking → pantry**: requirement × servings (double batch takes double), soonest-expiring first; logging a cooked recipe consumes automatically.
+* **Pantry**: variants stored exactly, duplicate prevention ("You already have Jasmine Rice · Update quantity / Add separately"; egg/eggs, milk/2% milk merge), pantry-first planning (on hand, expiring, opened), optional waste score.
+* 230 tests, including the exact beta cases (PANTRY RICE, PANTRY PARTIAL RICE, LACTOSE-FREE MILK incl. AI returning regular milk, PANTRY VARIANT, INCOMPATIBLE VARIANT) and the full loop.
+
 ## 0.5.0 — 2026-10-14 · "Plans are defaults" (behavioral intelligence)
 
 No UX restructure. The system now understands planned / suggested / actual / available now / completed / skipped / rescheduled / no longer relevant. Details in `docs/behavior.md`.

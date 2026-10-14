@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Plus, Trash2, Sparkles, ChefHat, AlertTriangle, Clock } from "lucide-react";
 import { cookSuggestionAction, deletePantryAction, setPantryLevelAction, updatePantryAction, upsertPantryAction, whatCanIEatAction } from "@/actions/food";
 import { useFeedback } from "@/components/feedback/FeedbackProvider";
+import { Sheet } from "@/components/ui/Sheet";
 import { Button, Segmented, cx, inputClass } from "@/components/ui/primitives";
 
 export interface PantryVM {
@@ -17,7 +18,10 @@ export interface PantryVM {
   expiresAt: string | null;
   servings: number | null;
   expiring: boolean;
+  product?: string | null;
+  variant?: string | null;
 }
+type Choice = NonNullable<Awaited<ReturnType<typeof upsertPantryAction>>["needsChoice"]>;
 type Suggest = Awaited<ReturnType<typeof whatCanIEatAction>>;
 
 const LEVELS: { v: "none" | "some" | "lot"; l: string }[] = [
@@ -35,6 +39,25 @@ export function PantryScreen({ items, aiEnabled }: { items: PantryVM[]; aiEnable
   const [mealType, setMealType] = useState<"breakfast" | "lunch" | "dinner" | "snack">(new Date().getHours() < 11 ? "breakfast" : new Date().getHours() < 15 ? "lunch" : "dinner");
   const [sug, setSug] = useState<Suggest | null>(null);
   const [busy, setBusy] = useState(false);
+  const [choice, setChoice] = useState<Choice | null>(null);
+  const [servings, setServings] = useState(1);
+
+  /** Pantry changes reconcile the current shopping list; say so when something moved. */
+  const reconciledToast = (changes?: string[]) => {
+    if (changes?.length) toast(`Shopping list updated · ${changes.slice(0, 2).join(" · ")}`, "quest");
+  };
+  const add = (mode?: "merge" | "separate") =>
+    start(async () => {
+      const r = await upsertPantryAction({ name }, mode);
+      if (r.needsChoice) {
+        setChoice(r.needsChoice);
+        return;
+      }
+      setName("");
+      setChoice(null);
+      reconciledToast(r.reconciled);
+      router.refresh();
+    });
 
   const ask = async () => {
     setBusy(true);
@@ -69,6 +92,13 @@ export function PantryScreen({ items, aiEnabled }: { items: PantryVM[]; aiEnable
             {busy ? "Thinking…" : "Suggest"}
           </Button>
         </div>
+        {sug && sug.suggestions.length > 0 && (
+          <div className="flex items-center gap-2 text-[11.5px] text-muted">
+            Cooking
+            <Segmented value={String(servings)} onChange={(v) => setServings(Number(v))} options={[{ value: "1", label: "1×" }, { value: "2", label: "2×" }, { value: "4", label: "4×" }]} className="w-40" />
+            <span>· a double batch takes double from the pantry</span>
+          </div>
+        )}
         {items.length === 0 && <p className="text-xs text-warn">Add what you have first — or finish a shopping list and it fills itself.</p>}
         {sug && (
           <div className="space-y-2">
@@ -92,9 +122,9 @@ export function PantryScreen({ items, aiEnabled }: { items: PantryVM[]; aiEnable
                     disabled={pending}
                     onClick={() =>
                       start(async () => {
-                        const r = await cookSuggestionAction({ ...s, mealType });
+                        const r = await cookSuggestionAction({ ...s, mealType, servings });
                         notify(r);
-                        toast("Logged as cooked · pantry updated", "quest");
+                        toast(`Logged as cooked · pantry updated${servings > 1 ? ` (${servings}×)` : ""}`, "quest");
                         setSug(null);
                         router.refresh();
                       })
@@ -132,8 +162,8 @@ export function PantryScreen({ items, aiEnabled }: { items: PantryVM[]; aiEnable
         </div>
         <div className="plate p-0">
           <div className="flex gap-2 border-b border-border/60 px-3 py-2">
-            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Add: chicken 2 lb, eggs, rice…" className={inputClass} onKeyDown={(e) => { if (e.key === "Enter" && name.trim()) start(async () => { await upsertPantryAction({ name }); setName(""); router.refresh(); }); }} />
-            <Button variant="secondary" disabled={pending || !name.trim()} onClick={() => start(async () => { await upsertPantryAction({ name }); setName(""); router.refresh(); })}>
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Add: chicken 2 lb, eggs, lactose-free milk…" className={inputClass} onKeyDown={(e) => { if (e.key === "Enter" && name.trim()) add(); }} aria-label="Add to pantry" />
+            <Button variant="secondary" disabled={pending || !name.trim()} onClick={() => add()} aria-label="Add">
               <Plus size={14} />
             </Button>
           </div>
@@ -144,6 +174,7 @@ export function PantryScreen({ items, aiEnabled }: { items: PantryVM[]; aiEnable
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5 text-sm capitalize">
                     {it.name}
+                    {it.product && <span className="normal-case text-[11px] text-faint">· {it.product}</span>}
                     {it.expiring && (
                       <span className="flex items-center gap-0.5 rounded-full bg-warn/15 px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-warn">
                         <AlertTriangle size={9} /> use soon
@@ -162,12 +193,12 @@ export function PantryScreen({ items, aiEnabled }: { items: PantryVM[]; aiEnable
                 </div>
                 <div className="flex rounded-lg border border-border bg-black/30 p-0.5">
                   {LEVELS.map((l) => (
-                    <button key={l.v} disabled={pending} onClick={() => start(async () => { await setPantryLevelAction(it.id, l.v); router.refresh(); })} className={cx("press rounded-md px-2 py-1 text-[11px]", it.level === l.v ? "bg-card-2 text-text" : "text-muted")}>
+                    <button key={l.v} disabled={pending} onClick={() => start(async () => { const r = await setPantryLevelAction(it.id, l.v); reconciledToast(r.reconciled); router.refresh(); })} className={cx("press rounded-md px-2 py-1 text-[11px]", it.level === l.v ? "bg-card-2 text-text" : "text-muted")}>
                       {l.l}
                     </button>
                   ))}
                 </div>
-                <button aria-label={`Remove ${it.name}`} disabled={pending} onClick={() => start(async () => { await deletePantryAction(it.id); router.refresh(); })} className="press flex h-11 w-11 items-center justify-center rounded-full text-faint hover:text-danger">
+                <button aria-label={`Remove ${it.name}`} disabled={pending} onClick={() => start(async () => { const r = await deletePantryAction(it.id); reconciledToast(r.reconciled); router.refresh(); })} className="press flex h-11 w-11 items-center justify-center rounded-full text-faint hover:text-danger">
                   <Trash2 size={13} />
                 </button>
               </li>
@@ -175,6 +206,31 @@ export function PantryScreen({ items, aiEnabled }: { items: PantryVM[]; aiEnable
           </ul>
         </div>
       </section>
+
+      <Sheet open={!!choice} onClose={() => setChoice(null)} title="Already in your pantry">
+        {choice && (
+          <div className="space-y-3 pb-2" data-testid="pantry-duplicate">
+            <p className="serif text-[14px]">
+              You already have <span className="capitalize">{choice.existing.name}</span>
+              {choice.existing.qty != null ? ` (${choice.existing.qty} ${choice.existing.unit})` : choice.existing.level ? ` (${choice.existing.level === "lot" ? "a lot" : choice.existing.level})` : ""}.
+              {choice.sameName ? "" : ` You typed "${choice.name}".`}
+            </p>
+            <div className="flex flex-col gap-2">
+              <Button full variant="gold" disabled={pending} onClick={() => add("merge")}>
+                Update quantity
+              </Button>
+              {!choice.sameName && (
+                <Button full variant="secondary" disabled={pending} onClick={() => add("separate")}>
+                  Add separately
+                </Button>
+              )}
+              <Button full variant="ghost" onClick={() => setChoice(null)}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        )}
+      </Sheet>
     </div>
   );
 }
@@ -192,7 +248,7 @@ function QtyEditor({ it }: { it: PantryVM }) {
     );
   return (
     <span className="flex items-center gap-1">
-      <input autoFocus type="number" step="0.25" value={v} onChange={(e) => setV(e.target.value)} className={cx(inputClass, "h-7 w-20 px-2 py-0 text-xs")} onKeyDown={(e) => { if (e.key === "Enter") start(async () => { await updatePantryAction(it.id, { qty: v === "" ? null : Number(v) }); setEdit(false); router.refresh(); }); if (e.key === "Escape") setEdit(false); }} />
+      <input autoFocus type="number" step="0.25" value={v} onChange={(e) => setV(e.target.value)} className={cx(inputClass, "h-7 w-20 px-2 py-0 text-xs")} aria-label={`Quantity of ${it.name}`} onKeyDown={(e) => { if (e.key === "Enter") start(async () => { await updatePantryAction(it.id, { qty: v === "" ? null : Number(v) }); setEdit(false); router.refresh(); }); if (e.key === "Escape") setEdit(false); }} />
       <span>{it.unit}</span>
     </span>
   );

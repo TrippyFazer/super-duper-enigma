@@ -191,9 +191,14 @@ export async function logNutritionAction(input: LogFoodInput): Promise<ActionFee
     let savedFoodId = s.savedFoodId ?? null;
     if (s.save && !savedFoodId) savedFoodId = n.saveFood({ name: s.name, brand: s.venue ?? null, calories: s.calories, protein: s.protein, carbs: s.carbs, fat: s.fat, source: s.source ?? "manual", isEstimate: s.isEstimate }).id;
     const r = n.logNutrition(
-      { date, mealType: s.mealType, name: s.name, calories: s.calories * portion, protein: (s.protein ?? 0) * portion, carbs: (s.carbs ?? 0) * portion, fat: (s.fat ?? 0) * portion, source: s.source, recipeId: s.recipeId, planMealIndex: s.planMealIndex, plannedMealId: s.plannedMealId, replacesPlannedMealId: s.replacesPlannedMealId, savedFoodId, isEstimate: s.isEstimate, venue: s.venue, cooked: s.cooked },
+      { date, mealType: s.mealType, name: s.name, calories: s.calories * portion, protein: (s.protein ?? 0) * portion, carbs: (s.carbs ?? 0) * portion, fat: (s.fat ?? 0) * portion, source: s.source, recipeId: s.recipeId, planMealIndex: s.planMealIndex, plannedMealId: s.plannedMealId, replacesPlannedMealId: s.replacesPlannedMealId, savedFoodId, isEstimate: s.isEstimate, venue: s.venue, cooked: s.cooked, servings: s.cooked ? portion : undefined },
       { proteinTarget: t.protein, calorieTarget: t.calories, unsafeTargets: t.unsafe },
     );
+    if (s.cooked) {
+      // cooking took ingredients out of the pantry → the shopping list reflects it (meals untouched)
+      const { onPantryChanged } = await import("@/services/foodWeek");
+      onPantryChanged(p.today);
+    }
     reconcile();
     revalidatePath("/", "layout");
     const fb = feedback(r.xp.map((x) => `${x.description} +${x.amount}`), r.xp.reduce((a, b) => a + b.amount, 0));
@@ -296,7 +301,7 @@ export async function askCoachAction(question: string) {
 export async function savePreferencesAction(input: unknown) {
   const schema = zod.object({
     fitness: zod.object({ goal: zod.enum(["general", "strength", "muscle", "fat-loss", "conditioning", "athleticism", "hybrid"]), experience: zod.enum(["beginner", "intermediate", "advanced"]), daysPerWeek: zod.coerce.number().int().min(1).max(7), equipment: zod.array(zod.enum(["barbell", "dumbbell", "cable", "machine", "bodyweight", "kettlebell", "band", "cardio-machine"])), workoutLengthMin: zod.coerce.number().int().min(15).max(120), injuries: zod.string().max(300), preferences: zod.string().max(300), trainingDays: zod.array(zod.number().int().min(0).max(6)).max(7) }).partial().optional(),
-    nutrition: zod.object({ goal: zod.enum(["maintain", "lose", "gain", "recomp"]), calorieTarget: zod.coerce.number().int().min(800).max(6000).nullable(), proteinTarget: zod.coerce.number().int().min(20).max(400).nullable(), carbTarget: zod.coerce.number().int().min(0).max(800).nullable(), fatTarget: zod.coerce.number().int().min(0).max(300).nullable(), dietPrefs: zod.array(zod.string().max(30)), dislikes: zod.array(zod.string().max(40)), likes: zod.array(zod.string().max(40)), mealsPerDay: zod.coerce.number().int().min(2).max(6), maxPrepMin: zod.coerce.number().int().min(5).max(120), budget: zod.enum(["low", "medium", "high"]) }).partial().optional(),
+    nutrition: zod.object({ goal: zod.enum(["maintain", "lose", "gain", "recomp"]), calorieTarget: zod.coerce.number().int().min(800).max(6000).nullable(), proteinTarget: zod.coerce.number().int().min(20).max(400).nullable(), carbTarget: zod.coerce.number().int().min(0).max(800).nullable(), fatTarget: zod.coerce.number().int().min(0).max(300).nullable(), dietPrefs: zod.array(zod.string().max(30)), dislikes: zod.array(zod.string().max(40)), likes: zod.array(zod.string().max(40)), foodRules: zod.array(zod.object({ id: zod.string().max(40), kind: zod.enum(["allergy", "intolerance", "religious", "avoid", "prefer-substitute", "prefer", "dislike"]), target: zod.string().trim().min(1).max(40), substitute: zod.string().trim().max(40).nullable().optional(), note: zod.string().max(120).optional() })).max(60), mealsPerDay: zod.coerce.number().int().min(2).max(6), maxPrepMin: zod.coerce.number().int().min(5).max(120), budget: zod.enum(["low", "medium", "high"]) }).partial().optional(),
     questFrequency: zod.enum(["low", "normal", "high"]).optional(),
     notifications: zod.object({ quest: zod.boolean(), workout: zod.boolean(), meals: zod.boolean(), level: zod.boolean(), rank: zod.boolean(), achievement: zod.boolean(), sobriety: zod.boolean(), review: zod.boolean(), browser: zod.boolean(), morningMotivation: zod.boolean(), windDown: zod.boolean(), windDownLeadMin: zod.coerce.number().int().min(0).max(240), workoutReminder: zod.boolean(), workoutReminderTime: zod.string().regex(/^\d{2}:\d{2}$/), mealPrepReminder: zod.boolean(), weeklyPlanning: zod.boolean(), weeklyPlanningTime: zod.string().regex(/^\d{2}:\d{2}$/) }).partial().optional(),
     sleep: zod.object({ wakeTarget: zod.string().regex(/^\d{2}:\d{2}$/).nullable(), windDownMin: zod.coerce.number().int().min(0).max(120), fallAsleepMin: zod.coerce.number().int().min(0).max(60) }).partial().optional(),
@@ -306,6 +311,13 @@ export async function savePreferencesAction(input: unknown) {
   });
   const s = schema.parse(input);
   updateProfile({ preferences: s as never });
+  // Food rules changed → the plan being shopped for follows them now (meals repaired in place, list reconciled).
+  if (s.nutrition && ("foodRules" in s.nutrition || "dietPrefs" in s.nutrition || "dislikes" in s.nutrition)) {
+    const { activeWeekRow, nextWeekRow, applyRulesToWeek } = await import("@/services/foodWeek");
+    const p = getProfile();
+    const row = activeWeekRow(p.today) ?? nextWeekRow(p.today);
+    if (row && row.status !== "reviewed") applyRulesToWeek(row.id);
+  }
   revalidatePath("/", "layout");
 }
 /** Sleep schedule: wake target + duration → derived bedtime targets (kept in sync with the legacy bedtimeTarget). */

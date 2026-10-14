@@ -66,7 +66,7 @@ export default async function WeekPage({ searchParams }: { searchParams: Promise
                 estimatedCost: wk.estimatedCost,
                 actualCost: wk.actualCost,
                 summary: wk.summaryParsed,
-                items: wk.items.map((i) => ({ id: i.id, name: i.name, category: i.category, qty: i.qty, unit: i.unit, estPrice: i.estPrice, actualQty: i.actualQty, actualPrice: i.actualPrice, purchased: i.purchased, skipped: i.skipped, usedIn: parseJson<string[]>(i.usedIn, []), coveredByPantry: i.coveredByPantry, note: i.note })),
+                items: wk.items.map((i) => ({ id: i.id, name: i.name, category: i.category, qty: i.qty, unit: i.unit, estPrice: i.estPrice, actualQty: i.actualQty, actualPrice: i.actualPrice, purchased: i.purchased, skipped: i.skipped, usedIn: parseJson<string[]>(i.usedIn, []), coveredByPantry: i.coveredByPantry, note: i.note, coverage: i.coverage, requiredServings: i.requiredServings, onHandServings: i.onHandServings, substitutedFrom: i.substitutedFrom, usedInCounts: parseJson<{ name: string; count: number }[]>(i.usedInCounts ?? "[]", []) })),
                 prep: wk.prep ? { id: wk.prep.id, status: wk.prep.status, estimatedMinutes: wk.prep.estimatedMinutes, items: wk.prepItems, supports: parseJson<string[]>(wk.prep.supports, []) } : null,
                 days: wk.days.map((d) => ({ date: d.date, label: `${formatWeekdayShort(d.date)} ${formatShort(d.date)}`, meals: d.meals.filter((m) => m.status !== "discarded").map((m) => ({ id: m.id, mealType: m.mealType, name: m.name, calories: m.calories, protein: m.protein, status: m.status, prepMinutes: m.prepMinutes })) })),
               }

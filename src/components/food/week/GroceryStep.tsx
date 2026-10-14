@@ -21,7 +21,8 @@ export function GroceryStep({ week: w, onSetup, onNext }: { week: WeekVM | null;
   return (
     <section className="space-y-3">
       <StepTitle eyebrow="Step 5" title="Shopping list" body="Prices are estimates. What you actually buy becomes your pantry and your real spend." />
-      <ShoppingList weekId={w.id} status={w.status} items={w.items} budget={w.budget} />
+      <ShoppingList weekId={w.id} status={w.status} items={w.items} budget={w.budget} reconciled={w.summary.reconciled ?? null} />
+      {w.summary.ignorePantry && <p className="serif px-1 text-[12px] text-faint">Planned without using your pantry (you asked for a fresh start).</p>}
       {w.summary.staplesAssumed && w.summary.staplesAssumed.length > 0 && <p className="serif px-1 text-[12px] text-faint">Assumed on hand: {w.summary.staplesAssumed.join(", ")}.</p>}
       <Button full variant="gold" onClick={onNext}>
         Meal prep <ChevronRight size={14} />

@@ -1,4 +1,5 @@
 import { buildAiContext } from "@/ai/context";
+import { deriveRules } from "@/food/rules";
 import { aiQuestCandidate, coachReply, generateMeals, generateWorkout } from "@/ai/generate";
 import { isAiEnabled } from "@/ai/config";
 import { addDays, lastNDays } from "@/lib/dates";
@@ -161,6 +162,6 @@ export async function proposeAdjustment(unplanned: string) {
   const assessment = getAssessment(profile);
   const ctx = buildAiContext(profile, profile.preferences, assessment);
   const recipes = loadRecipes().map((r) => ({ id: r.id, name: r.name, mealType: r.mealType, calories: r.calories, proteinG: r.proteinG, carbsG: r.carbsG, fatG: r.fatG, tags: r.tagsParsed, ingredients: r.ingredientsParsed, prepTimeMin: r.prepTimeMin, cookTimeMin: r.cookTimeMin, isFavorite: r.isFavorite }));
-  const proposal = await adjustDay(ctx, { remaining, remainingCalories: targets.calories - totals.calories, remainingProtein: targets.protein - totals.protein, recipes, pantry: pantryNames(), maxPrepMin: profile.preferences.nutrition.maxPrepMin, dislikes: profile.preferences.nutrition.dislikes, unplanned });
+  const proposal = await adjustDay(ctx, { remaining, remainingCalories: targets.calories - totals.calories, remainingProtein: targets.protein - totals.protein, recipes, pantry: pantryNames(), maxPrepMin: profile.preferences.nutrition.maxPrepMin, dislikes: profile.preferences.nutrition.dislikes, unplanned, rules: deriveRules(profile.preferences.nutrition) });
   return proposal ? { ...proposal, remainingCalories: targets.calories - totals.calories, remainingProtein: targets.protein - totals.protein } : null;
 }

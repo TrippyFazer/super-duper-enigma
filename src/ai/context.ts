@@ -1,4 +1,5 @@
 import { addDays, lastNDays, type ISODate } from "@/lib/dates";
+import { deriveRules, rulesForAi } from "@/food/rules";
 import { EXERCISES } from "@/planner/exercises";
 import type { CharacterAssessment } from "@/ranking/types";
 import { DOMAINS } from "@/ranking/domains";
@@ -47,6 +48,8 @@ export interface AiContext {
     dietPrefs: string[];
     dislikes: string[];
     likes: string[];
+    /** structured food rules: MUST (hardRestrictions/intolerances), substitutions, preferences */
+    foodRules: ReturnType<typeof rulesForAi>;
     mealsPerDay: number;
     maxPrepMin: number;
     budget: string;
@@ -107,6 +110,7 @@ export function buildAiContext(profile: ProfileView, prefs: Preferences, assessm
       todayEntries: entriesForDate(today).map((e) => ({ name: e.name, calories: e.calories, protein: e.protein })),
       dietPrefs: prefs.nutrition.dietPrefs,
       dislikes: prefs.nutrition.dislikes,
+      foodRules: rulesForAi(deriveRules(prefs.nutrition)),
       likes: [...prefs.nutrition.likes, ...(opts.onHand ?? []).map((x) => `on hand: ${x}`)],
       mealsPerDay: prefs.nutrition.mealsPerDay,
       maxPrepMin: prefs.nutrition.maxPrepMin,

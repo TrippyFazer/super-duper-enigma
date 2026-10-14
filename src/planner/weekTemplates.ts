@@ -1,4 +1,7 @@
-import { CATEGORY_LABEL, canonicalName, findIngredient, type GroceryCategory } from "@/food/ingredients";
+import { pantryCovers } from "@/food/families";
+import { findIngredient, type GroceryCategory } from "@/food/ingredients";
+import { requirementsFromMeals, reconcile, type PantryStock } from "@/food/reconcile";
+import { deriveRules, preferenceScore, recipeExcluded, validateMeal, type FoodRules } from "@/food/rules";
 import { addDays, type ISODate } from "@/lib/dates";
 import type { NutritionPrefs } from "@/services/preferences";
 import type { RecipeLite } from "./mealTemplates";
@@ -26,6 +29,16 @@ export interface WeekPrefs {
 export interface PantryOnHand {
   name: string;
   servings: number | null; // null = unknown amount, assume ~2
+  /** coarse level when the amount is unknown */
+  level?: "none" | "some" | "lot" | null;
+  /** use-first signals */
+  expiring?: boolean;
+  opened?: boolean;
+}
+
+/** PantryOnHand → the stock model the reconciliation engine reads. */
+export function pantryStock(p: PantryOnHand): PantryStock {
+  return { name: p.name, qty: p.servings, unit: "servings", level: p.level ?? (p.servings == null ? "some" : null) };
 }
 export interface WeekMeal {
   date: ISODate;
@@ -51,6 +64,13 @@ export interface ShoppingItem {
   usedIn: string[];
   coveredByPantry: boolean;
   note?: string;
+  /** reconciliation detail (servings) */
+  requiredServings?: number;
+  onHandServings?: number;
+  coverage?: "full" | "partial" | "none" | "confirm";
+  substitutedFrom?: string | null;
+  usedInCounts?: { name: string; count: number }[];
+  why?: string;
 }
 export interface PrepItem {
   name: string;
@@ -86,6 +106,8 @@ export interface GenerateWeekInput {
   recentRecipeIds?: number[];
   /** Number of days the plan covers (default 7). A supply run may cover 3–5 days from today. */
   days?: number;
+  /** derived from prefs when absent */
+  rules?: FoodRules;
 }
 
 function rng(seed: number) {
@@ -96,45 +118,51 @@ function rng(seed: number) {
   };
 }
 
-const MEAT = /\b(chicken|beef|pork|turkey|steak|bacon|ham|lamb|sausage)\b/;
-const FISH = /\b(salmon|tuna|shrimp|fish|cod)\b/;
-function excluded(r: RecipeLite, prefs: NutritionPrefs): boolean {
-  const text = `${r.name} ${r.ingredients.join(" ")}`.toLowerCase();
-  for (const d of prefs.dislikes) if (d && text.includes(d.toLowerCase())) return true;
-  if (prefs.dietPrefs.includes("vegetarian") && (MEAT.test(text) || FISH.test(text))) return true;
-  if (prefs.dietPrefs.includes("pescatarian") && MEAT.test(text)) return true;
-  if (prefs.dietPrefs.includes("dairy-free") && /\b(cheese|milk|yogurt|butter|cream|feta|parmesan)\b/.test(text)) return true;
-  if (prefs.dietPrefs.includes("gluten-free") && /\b(bread|pasta|tortilla|flour|bagel|couscous)\b/.test(text)) return true;
-  return false;
+/** One rules engine for every planner: hard rules exclude, dislikes exclude, substitutions apply to the chosen meals. */
+function excluded(r: RecipeLite, rules: FoodRules): boolean {
+  return recipeExcluded(r, rules) != null;
 }
 
 /** Catalog-priced marginal cost of a recipe's *new* ingredients given what is already in the basket. */
-function marginalCost(r: RecipeLite, basket: Set<string>, pantry: Map<string, number>): number {
+function marginalCost(r: RecipeLite, basket: Set<string>, pantry: PantryOnHand[]): number {
   let cost = 0;
   for (const ing of r.ingredients) {
     const def = findIngredient(ing);
     if (!def || def.staple) continue;
     const name = def.name;
     if (basket.has(name)) continue;
-    if ((pantry.get(name) ?? 0) >= 2) continue;
+    if (onHandServings(ing, pantry) >= 2) continue;
     cost += def.price;
   }
   return cost;
+}
+
+/** Servings of an ingredient the pantry can cover (compatible variants only). */
+function onHandServings(ing: string, pantry: PantryOnHand[]): number {
+  let n = 0;
+  for (const p of pantry) if (p.level !== "none" && pantryCovers(ing, p.name)) n += p.servings ?? (p.level === "lot" ? 6 : 2);
+  return n;
 }
 
 const PREP_MINUTES: Record<string, number> = { "chicken breast": 25, "chicken thighs": 30, "ground beef": 20, "ground turkey": 20, salmon: 20, rice: 20, quinoa: 20, potatoes: 35, "sweet potato": 35, broccoli: 20, "bell pepper": 15, eggs: 15, oats: 5, pasta: 15, lentils: 25, chickpeas: 10, "black beans": 10, tofu: 20 };
 
 export function generateTemplateWeek(input: GenerateWeekInput): GeneratedWeek {
   const rand = rng(input.seed ?? 1);
-  const pantry = new Map<string, number>();
-  for (const p of input.pantry) pantry.set(canonicalName(p.name), p.servings ?? 2);
+  const rules = input.rules ?? deriveRules(input.prefs);
+  const pantry = input.pantry.filter((p) => p.level !== "none");
   const recent = new Set(input.recentRecipeIds ?? []);
-  const pool = input.recipes.filter((r) => r.calories != null && r.proteinG != null && !excluded(r, input.prefs));
+  // Substitutions apply to the catalog before selection, so a swapped ingredient is what gets scored and bought.
+  const pool = input.recipes
+    .filter((r) => r.calories != null && r.proteinG != null && !excluded(r, rules))
+    .map((r) => {
+      const v = validateMeal({ name: r.name, ingredients: r.ingredients, calories: r.calories!, protein: r.proteinG!, carbs: r.carbsG ?? 0, fat: r.fatG ?? 0 }, rules);
+      return v.status === "repaired" ? { ...r, ingredients: v.meal.ingredients, calories: v.meal.calories, proteinG: v.meal.protein, carbsG: v.meal.carbs, fatG: v.meal.fat } : r;
+    });
   const byType = (t: string) => pool.filter((r) => r.mealType === t || r.mealType === "any");
 
   const basket = new Set<string>(); // canonical ingredient names already planned
   const chosen: { recipe: RecipeLite; times: number; slot: "breakfast" | "lunch" | "dinner" }[] = [];
-  const likes = input.prefs.likes.map((l) => l.toLowerCase());
+  const canonicalName = (i: string) => findIngredient(i)?.name ?? i.toLowerCase();
 
   const score = (r: RecipeLite, slot: string, dinnerTime: boolean) => {
     let s = rand() * 6;
@@ -145,11 +173,13 @@ export function generateTemplateWeek(input: GenerateWeekInput): GeneratedWeek {
     const minutes = r.prepTimeMin + r.cookTimeMin;
     if (input.week.quickWeekdays && slot !== "dinner") s += minutes <= 15 ? 4 : minutes <= 30 ? 1 : -4;
     if (slot === "dinner" && dinnerTime) s += minutes <= input.prefs.maxPrepMin ? 2 : -3;
-    for (const l of likes) if (l && `${r.name} ${r.ingredients.join(" ")}`.toLowerCase().includes(l)) s += 4;
-    // Reuse: overlap with basket and pantry
+    s += preferenceScore(r, rules);
+    // Reuse: overlap with basket and pantry. PANTRY-FIRST: what you have, what is expiring, what is open.
     const overlap = r.ingredients.filter((i) => basket.has(canonicalName(i))).length;
-    const onHand = r.ingredients.filter((i) => (pantry.get(canonicalName(i)) ?? 0) > 0).length;
-    if (input.week.reuseIngredients) s += overlap * 3 + onHand * 2.5;
+    const onHand = r.ingredients.filter((i) => onHandServings(i, pantry) > 0).length;
+    const urgent = r.ingredients.filter((i) => pantry.some((p) => (p.expiring || p.opened) && pantryCovers(i, p.name))).length;
+    s += onHand * 2.5 + urgent * 4;
+    if (input.week.reuseIngredients) s += overlap * 3;
     // Cost pressure
     const cost = marginalCost(r, basket, pantry);
     const perMeal = input.budget / Math.max(6, input.mealsNeeded.breakfast + input.mealsNeeded.lunch + input.mealsNeeded.dinner);
@@ -188,7 +218,7 @@ export function generateTemplateWeek(input: GenerateWeekInput): GeneratedWeek {
 
   // --- Budget trim: while over budget, swap the recipe with the highest marginal cost
   // (any slot) for the cheapest alternative in that slot; stop when nothing cheaper exists.
-  const buildList = () => shoppingListFor(chosen, pantry, input);
+  const buildList = () => shoppingListFor(chosen, pantry, input, rules);
   let list = buildList();
   const ceiling = input.budget * (input.budgetMode === "flexible" ? 1.25 : input.budgetMode === "balanced" ? 1.08 : 1.0);
   let guard = 0;
@@ -258,12 +288,7 @@ export function generateTemplateWeek(input: GenerateWeekInput): GeneratedWeek {
     }
   }
   // Snacks to approach protein target on planned days (template protein snacks).
-  const SNACKS = [
-    { name: "Greek yogurt + berries", calories: 180, protein: 18, carbs: 20, fat: 3, ingredients: ["greek yogurt", "berries"] },
-    { name: "Protein shake", calories: 220, protein: 30, carbs: 10, fat: 4, ingredients: ["protein powder", "milk"] },
-    { name: "Cottage cheese + fruit", calories: 240, protein: 24, carbs: 20, fat: 6, ingredients: ["cottage cheese", "fruit"] },
-    { name: "Two hard-boiled eggs", calories: 156, protein: 12, carbs: 1, fat: 10, ingredients: ["eggs"] },
-  ].filter((s) => !input.prefs.dislikes.some((dk) => dk && s.name.toLowerCase().includes(dk.toLowerCase()))).filter((s) => !(input.prefs.dietPrefs.includes("dairy-free") && /yogurt|cottage|milk/.test(s.name.toLowerCase())));
+  const SNACKS = snacksFor(rules);
   let snackIdx = 0;
   for (const day of days) {
     const dayMeals = meals.filter((m) => m.date === day);
@@ -282,7 +307,7 @@ export function generateTemplateWeek(input: GenerateWeekInput): GeneratedWeek {
   }
 
   // Final list including snacks (ingredient demand from the actual schedule, not just chosen recipes).
-  const finalList = shoppingListFromMeals(meals, pantry, input);
+  const finalList = shoppingListFromMeals(meals, pantry, input, rules);
 
   // --- Prep plan from repeated proteins/grains/veg in dinners+lunches.
   const prepPlan = buildPrepPlan(meals.filter((m) => !m.leftover && (m.mealType === "dinner" || m.mealType === "lunch")));
@@ -302,51 +327,57 @@ export function generateTemplateWeek(input: GenerateWeekInput): GeneratedWeek {
   };
 }
 
-function shoppingListFor(chosen: { recipe: RecipeLite; times: number }[], pantry: Map<string, number>, input: GenerateWeekInput) {
-  const meals: WeekMeal[] = chosen.flatMap((c) => Array.from({ length: c.times }, () => ({ date: input.weekStart, mealType: "dinner" as const, name: c.recipe.name, calories: 0, protein: 0, carbs: 0, fat: 0, ingredients: c.recipe.ingredients, recipeId: c.recipe.id, prepMinutes: 0 })));
-  return shoppingListFromMeals(meals, pantry, input);
+/** The template snack library, passed through the same rules as everything else (dairy-free → no yogurt; lactose-free → lactose-free milk in the shake). */
+export function snacksFor(rules: FoodRules): { name: string; calories: number; protein: number; carbs: number; fat: number; ingredients: string[] }[] {
+  const base = [
+    { name: "Greek yogurt + berries", calories: 180, protein: 18, carbs: 20, fat: 3, ingredients: ["greek yogurt", "berries"] },
+    { name: "Protein shake", calories: 220, protein: 30, carbs: 10, fat: 4, ingredients: ["protein powder", "milk"] },
+    { name: "Cottage cheese + fruit", calories: 240, protein: 24, carbs: 20, fat: 6, ingredients: ["cottage cheese", "fruit"] },
+    { name: "Apple + peanut butter", calories: 280, protein: 8, carbs: 32, fat: 16, ingredients: ["apple", "peanut butter"] },
+    { name: "Two hard-boiled eggs", calories: 156, protein: 12, carbs: 1, fat: 10, ingredients: ["eggs"] },
+  ];
+  const out: typeof base = [];
+  for (const sn of base) {
+    if (recipeExcluded(sn, rules)) continue;
+    const v = validateMeal(sn, rules);
+    if (v.status === "rejected") continue;
+    out.push(v.meal);
+  }
+  return out;
 }
 
-export function shoppingListFromMeals(meals: WeekMeal[], pantry: Map<string, number>, input: Pick<GenerateWeekInput, "budgetMode">): { items: ShoppingItem[]; total: number; reusePct: number; staples: string[]; covered: number } {
-  // servings demanded per canonical ingredient, and which meals use it
-  const demand = new Map<string, { servings: number; usedIn: Set<string>; raw: string }>();
-  for (const m of meals) {
-    if (m.leftover) continue;
-    for (const ing of m.ingredients) {
-      const key = canonicalName(ing);
-      const cur = demand.get(key) ?? { servings: 0, usedIn: new Set<string>(), raw: ing };
-      cur.servings += 1;
-      cur.usedIn.add(m.name);
-      demand.set(key, cur);
-    }
-  }
-  const items: ShoppingItem[] = [];
-  const staples: string[] = [];
-  let total = 0;
-  let covered = 0;
-  let reused = 0;
-  for (const [name, d] of demand) {
-    if (d.usedIn.size >= 2) reused++;
-    const def = findIngredient(name);
-    const onHand = pantry.get(name) ?? 0;
-    if (def?.staple) {
-      staples.push(name);
-      continue;
-    }
-    const needServings = Math.max(0, d.servings - onHand);
-    if (needServings <= 0) {
-      items.push({ name, category: def?.category ?? "other", qty: 0, unit: def?.unit ?? "each", estPrice: 0, usedIn: [...d.usedIn], coveredByPantry: true, note: `You still have enough for ~${Math.round(onHand)} meals` });
-      covered++;
-      continue;
-    }
-    const units = def ? Math.max(0.5, Math.ceil((needServings / def.servingsPerUnit) * 2) / 2) : 1;
-    const est = def ? Math.round(units * def.price * 100) / 100 : null;
-    if (est) total += est;
-    items.push({ name, category: def?.category ?? "other", qty: units, unit: def?.unit ?? "each", estPrice: est, usedIn: [...d.usedIn], coveredByPantry: false, note: onHand > 0 ? `Reduced — you have ~${Math.round(onHand)} servings` : undefined });
-  }
-  const reusePct = demand.size ? Math.round((reused / demand.size) * 100) : 0;
-  items.sort((a, b) => Object.keys(CATEGORY_LABEL).indexOf(a.category) - Object.keys(CATEGORY_LABEL).indexOf(b.category) || a.name.localeCompare(b.name));
-  return { items, total: Math.round(total * 100) / 100, reusePct, staples, covered };
+function shoppingListFor(chosen: { recipe: RecipeLite; times: number }[], pantry: PantryOnHand[], input: GenerateWeekInput, rules?: FoodRules) {
+  const meals: WeekMeal[] = chosen.flatMap((c) => Array.from({ length: c.times }, () => ({ date: input.weekStart, mealType: "dinner" as const, name: c.recipe.name, calories: 0, protein: 0, carbs: 0, fat: 0, ingredients: c.recipe.ingredients, recipeId: c.recipe.id, prepMinutes: 0 })));
+  return shoppingListFromMeals(meals, pantry, input, rules);
+}
+
+/**
+ * Planned meals → requirements → pantry coverage → list. Quantity-aware: an
+ * item is "covered" only when compatible pantry stock meets the servings the
+ * plan needs; otherwise the list carries the difference.
+ */
+export function shoppingListFromMeals(meals: WeekMeal[], pantry: PantryOnHand[], input: Pick<GenerateWeekInput, "budgetMode">, rules?: FoodRules | null): { items: ShoppingItem[]; total: number; reusePct: number; staples: string[]; covered: number } {
+  void input;
+  const reqs = requirementsFromMeals(meals.map((m) => ({ name: m.name, ingredients: m.ingredients, leftover: m.leftover })), rules);
+  const r = reconcile(reqs, pantry.map(pantryStock));
+  const reused = reqs.filter((q) => q.usedIn.length >= 2).length;
+  const items: ShoppingItem[] = r.items.map((c) => ({
+    name: c.name,
+    category: c.category,
+    qty: c.qty,
+    unit: c.unit,
+    estPrice: c.estPrice,
+    usedIn: c.usedIn.map((u) => u.name),
+    coveredByPantry: c.status === "full",
+    note: c.status === "full" ? `You still have enough for ~${Math.round(c.onHand)} servings` : c.status === "partial" ? `Reduced — you have ~${Math.round(c.onHand)} servings` : c.status === "confirm" ? "Check your pantry" : undefined,
+    requiredServings: c.required,
+    onHandServings: c.onHand,
+    coverage: c.status,
+    substitutedFrom: c.substitutedFrom,
+    usedInCounts: c.usedIn,
+    why: c.why,
+  }));
+  return { items, total: r.total, reusePct: reqs.length ? Math.round((reused / reqs.length) * 100) : 0, staples: r.staples, covered: r.counts.have };
 }
 
 export function buildPrepPlan(meals: WeekMeal[]): { items: PrepItem[]; minutes: number } {

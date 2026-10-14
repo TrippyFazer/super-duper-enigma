@@ -864,6 +864,19 @@ export const groceryItems = sqliteTable(
     /** true when the item was not added (or reduced) because leftovers cover it */
     coveredByPantry: integer("covered_by_pantry", { mode: "boolean" }).notNull().default(false),
     note: text("note"),
+    // ---- Reconciliation: the list is WHAT THE PLAN NEEDS minus WHAT YOU HAVE
+    /** servings the planned meals need */
+    requiredServings: real("required_servings"),
+    /** servings the pantry can cover (compatible variant only) */
+    onHandServings: real("on_hand_servings"),
+    /** full | partial | none | confirm (pantry says "some") | manual (user said "I have it") | stock-up (buy anyway) */
+    coverage: text("coverage"),
+    /** canonical ingredient the row satisfies (family/variant aware) */
+    canonical: text("canonical"),
+    /** original ingredient when a food rule swapped it (e.g. "milk" → "lactose-free milk") */
+    substitutedFrom: text("substituted_from"),
+    /** JSON {name, count}[]: which meals, how many times */
+    usedInCounts: text("used_in_counts"),
     createdAt: text("created_at").notNull().default(now),
   },
   (t) => [index("grocery_items_week_idx").on(t.weekId)],
@@ -880,8 +893,13 @@ export const pantryItems = sqliteTable(
     level: text("level"),
     purchasedAt: text("purchased_at"),
     expiresAt: text("expires_at"),
-    /** grocery | manual | leftover */
+    /** grocery | manual | leftover | adventure */
     source: text("source").notNull().default("manual"),
+    /** ingredient family ("milk") and exact variant ("lactose-free milk") */
+    family: text("family"),
+    variant: text("variant"),
+    /** optional product / display metadata ("Fairlife Lactose-Free 2%") */
+    product: text("product"),
     updatedAt: text("updated_at").notNull().default(now),
     createdAt: text("created_at").notNull().default(now),
   },
