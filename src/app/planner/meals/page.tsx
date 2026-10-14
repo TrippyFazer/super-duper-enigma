@@ -6,6 +6,7 @@ import { isAiEnabled } from "@/ai/config";
 import { loadRecipes } from "@/services/loaders";
 import { PageHeader } from "@/components/ui/primitives";
 import { MealsScreen } from "@/components/planner/MealsScreen";
+import { getDayFlag } from "@/services/dayFlags";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Food" };
@@ -31,6 +32,7 @@ export default async function MealsPage({ searchParams }: { searchParams: Promis
         today={today}
         openLog={sp.log === "1"}
         adjustFor={sp.adjust ?? null}
+        finished={getDayFlag(today, "food_finished") === "1"}
         entries={entries.map((e) => ({ id: e.id, name: e.name, mealType: e.mealType, calories: e.calories, protein: e.protein, carbs: e.carbs, fat: e.fat, source: e.source, isEstimate: e.isEstimate, venue: e.venue }))}
         recipes={recipes}
         recents={recents}

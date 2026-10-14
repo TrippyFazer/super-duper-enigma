@@ -117,6 +117,8 @@ export function updateProfile(patch: ProfileUpdate): ProfileView {
       sleep: { ...current.preferences.sleep, ...(patch.preferences.sleep ?? {}) },
       motivation: { ...current.preferences.motivation, ...(patch.preferences.motivation ?? {}) },
       food: { ...current.preferences.food, ...(patch.preferences.food ?? {}) },
+      location: { ...current.preferences.location, ...(patch.preferences.location ?? {}) },
+      adventure: { ...current.preferences.adventure, ...(patch.preferences.adventure ?? {}), interests: { ...current.preferences.adventure.interests, ...(patch.preferences.adventure?.interests ?? {}) }, learned: { ...current.preferences.adventure.learned, ...(patch.preferences.adventure?.learned ?? {}) } },
       ai: { ...current.preferences.ai, ...(patch.preferences.ai ?? {}) },
     });
     values.preferences = toJson(merged);

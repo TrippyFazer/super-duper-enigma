@@ -177,7 +177,7 @@ export const QUEST_TEMPLATES: QuestTemplate[] = [
     kind: "weekly",
     domain: "cooking",
     applies: (c) => has(c, "cooking"),
-    build: () => ({ title: "Plan your meals for the week", description: "Budget, meals, shopping list. Sunday is the first quest of the week.", target: 1, rewardXp: 50 }),
+    build: () => ({ title: "Plan your meals for the week", description: "Budget, meals, shopping list — any day that suits you.", target: 1, rewardXp: 50 }),
     progress: (c) => (c.food.weekPlanned ? 1 : 0),
     priority: (c) => (c.food.weekPlanned ? 20 : 72),
   },

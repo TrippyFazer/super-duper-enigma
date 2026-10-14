@@ -37,7 +37,12 @@ export async function acceptOfferAction(id: number) {
 }
 /** Declining never touches XP, ranks, streaks or scores. It only marks the offer. */
 export async function declineOfferAction(id: number) {
-  declineOffer(z.number().int().parse(id));
+  const o = declineOffer(z.number().int().parse(id));
+  // Declining an adventure teaches the ranker a little (never a penalty anywhere else).
+  if (o?.category) {
+    const { rateOffer } = await import("@/services/adventure");
+    rateOffer(o.id, "declined");
+  }
   revalidatePath("/", "layout");
 }
 export async function completeOfferAction(id: number): Promise<ActionFeedback> {
@@ -296,6 +301,8 @@ export async function savePreferencesAction(input: unknown) {
     notifications: zod.object({ quest: zod.boolean(), workout: zod.boolean(), meals: zod.boolean(), level: zod.boolean(), rank: zod.boolean(), achievement: zod.boolean(), sobriety: zod.boolean(), review: zod.boolean(), browser: zod.boolean(), morningMotivation: zod.boolean(), windDown: zod.boolean(), windDownLeadMin: zod.coerce.number().int().min(0).max(240), workoutReminder: zod.boolean(), workoutReminderTime: zod.string().regex(/^\d{2}:\d{2}$/), mealPrepReminder: zod.boolean(), weeklyPlanning: zod.boolean(), weeklyPlanningTime: zod.string().regex(/^\d{2}:\d{2}$/) }).partial().optional(),
     sleep: zod.object({ wakeTarget: zod.string().regex(/^\d{2}:\d{2}$/).nullable(), windDownMin: zod.coerce.number().int().min(0).max(120), fallAsleepMin: zod.coerce.number().int().min(0).max(60) }).partial().optional(),
     food: zod.object({ weeklyBudget: zod.coerce.number().min(0).max(2000), budgetMode: zod.enum(["budget", "balanced", "flexible"]), shoppingDay: zod.coerce.number().int().min(0).max(6), quickWeekdays: zod.boolean(), mealPrep: zod.boolean(), highProtein: zod.boolean(), reuseIngredients: zod.boolean(), eatingOutPerWeek: zod.coerce.number().int().min(0).max(21) }).partial().optional(),
+    adventure: zod.object({ enabled: zod.boolean(), costPref: zod.enum(["free", "under20", "under50", "any"]), interests: zod.record(zod.string().max(30), zod.enum(["love", "interested", "neutral", "no"])) }).partial().optional(),
+    location: zod.object({ radiusMi: zod.coerce.number().int().min(2).max(60) }).partial().optional(),
   });
   const s = schema.parse(input);
   updateProfile({ preferences: s as never });
@@ -369,5 +376,13 @@ export async function getAiStatusAction() {
 }
 export async function markNotificationsReadAction() {
   markAllRead();
+  revalidatePath("/", "layout");
+}
+
+/** Explicit per-day states ("done eating for today", "rest day"). Never award XP; they only settle a row. */
+export async function setDayFlagAction(key: "food_finished" | "rest_day", on: boolean) {
+  const { setDayFlag } = await import("@/services/dayFlags");
+  const p = getProfile();
+  setDayFlag(p.today, zod.enum(["food_finished", "rest_day"]).parse(key), on ? "1" : null);
   revalidatePath("/", "layout");
 }

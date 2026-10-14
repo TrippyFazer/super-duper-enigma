@@ -8,6 +8,10 @@ import { PageHeader, SectionTitle, cx } from "@/components/ui/primitives";
 import { QuestRow } from "@/components/quests/QuestRow";
 import { UndoOfferButton } from "@/components/quests/UndoOfferButton";
 import { SpecialQuestCard } from "@/components/quests/SpecialQuestCard";
+import { offerView } from "@/components/quests/offerView";
+import { QuestActions } from "@/components/quests/QuestActions";
+import { adventureReady } from "@/services/adventure";
+import { isAiEnabled } from "@/ai/config";
 import { formatShort } from "@/lib/dates";
 
 export const dynamic = "force-dynamic";
@@ -38,10 +42,11 @@ export default async function QuestsPage() {
               <Swords size={12} /> {open.status === "accepted" ? "Active special quest" : "Available"}
             </span>
           </SectionTitle>
-          <SpecialQuestCard offer={{ id: open.id, title: open.title, description: open.description, domain: open.domain, difficulty: open.difficulty, kind: open.kind, estimatedMinutes: open.estimatedMinutes, xpReward: open.xpReward, status: open.status, expiresAt: open.expiresAt }} />
+          <SpecialQuestCard offer={offerView(open)} />
         </section>
       )}
-      {!open && <p className="serif px-1 text-[13px] text-muted">No special quest right now. They appear a few times a week, usually in the afternoon or evening.</p>}
+      {!open && <p className="serif px-1 text-[13px] text-muted">No special quest right now. They appear a few times a week — or find one yourself.</p>}
+      <QuestActions ready={adventureReady(profile).ok} reason={adventureReady(profile).reason} aiEnabled={isAiEnabled()} defaultCost={profile.preferences.adventure.costPref} />
 
       {active.length > 0 && (
         <section>
@@ -109,7 +114,7 @@ export default async function QuestsPage() {
               <div key={o.id} className="flex items-center gap-3 px-4 py-2.5 text-sm">
                 <div className="min-w-0 flex-1">
                   <div className={cx("truncate", o.status === "completed" ? "" : "text-muted")}>{o.title}</div>
-                  <div className="text-[11px] text-faint">{formatShort(o.date)} · +{o.xpReward} XP</div>
+                  <div className="text-[11px] text-faint">{formatShort(o.date)} · +{o.xpReward} XP{o.venue ? ` · ${o.venue}` : ""}{o.feedback ? ` · ${o.feedback.replace("-", " ")}` : ""}</div>
                 </div>
                 <span className={cx("text-[11px] uppercase tracking-wider", STATUS[o.status]?.cls)}>{STATUS[o.status]?.label ?? o.status}</span>
                 {o.status === "completed" && o.date === profile.today && <UndoOfferButton id={o.id} />}

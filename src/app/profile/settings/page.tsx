@@ -10,6 +10,8 @@ import Link from "next/link";
 import { HeartPulse, ChevronRight } from "lucide-react";
 import { appleHealthStatus } from "@/health/apple";
 import { PlannerSettings } from "@/components/profile/PlannerSettings";
+import { AdventureCard } from "@/components/profile/settings/AdventureCard";
+import { configuredEventSources } from "@/events/sources";
 import { aiStatus } from "@/ai/config";
 import { estimateTargets, SAFE_MIN_CALORIES } from "@/services/preferences";
 
@@ -33,6 +35,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         <SleepSettings initial={{ wakeTarget: profile.preferences.sleep.wakeTarget, sleepTargetMin: profile.targets.sleepTargetMin, windDownMin: profile.preferences.sleep.windDownMin, fallAsleepMin: profile.preferences.sleep.fallAsleepMin, bedtimeTarget: profile.targets.bedtimeTarget }} />
       </div>
       <MotivationEditor reasons={listReasons(true).map((r) => ({ id: r.id, text: r.text, active: r.active }))} />
+      <AdventureCard location={{ query: profile.preferences.location.query, city: profile.preferences.location.city, region: profile.preferences.location.region, lat: profile.preferences.location.lat, radiusMi: profile.preferences.location.radiusMi }} adventure={{ enabled: profile.preferences.adventure.enabled, costPref: profile.preferences.adventure.costPref, interests: profile.preferences.adventure.interests }} sourcesConfigured={configuredEventSources().length} />
       <PlannerSettings prefs={profile.preferences} ai={aiStatus()} estimated={(() => { const e = estimateTargets({ ...profile, goal: profile.preferences.nutrition.goal }); return { calories: e.calories, protein: e.protein }; })()} minCalories={SAFE_MIN_CALORIES(profile.sex)} />
       <Link href="/profile/settings/services" className="plate press flex items-center gap-3 px-4 py-3">
         <HeartPulse size={18} className="text-gold" />

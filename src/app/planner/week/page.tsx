@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { getProfile } from "@/services/profile";
-import { getWeek, planningWeekStart, weekFeedback } from "@/services/foodWeek";
+import { getWeek, listWeeks, suggestedPlanStart, weekEnd, weekFeedback } from "@/services/foodWeek";
 import { listPantry } from "@/services/pantry";
 import { getQuests, reconcile } from "@/services/progression";
 import { resolveTargets } from "@/services/nutrition";
@@ -13,28 +13,34 @@ import { WeekPlanner } from "@/components/food/WeekPlanner";
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Weekly preparation" };
 
-export default async function WeekPage({ searchParams }: { searchParams: Promise<{ week?: string; step?: string }> }) {
+export default async function WeekPage({ searchParams }: { searchParams: Promise<{ week?: string; step?: string; start?: string; days?: string }> }) {
   const profile = getProfile();
   if (!profile.onboarded) redirect("/onboarding");
   const sp = await searchParams;
   reconcile();
   const today = profile.today;
-  const weekStart = sp.week && /^\d{4}-\d{2}-\d{2}$/.test(sp.week) ? startOfWeek(sp.week) : planningWeekStart(today, profile.preferences.food.shoppingDay);
+  // Plans can start any day: ?week=<date> opens that plan, ?start=today (or a date) starts a fresh one from there,
+  // otherwise the app's suggested start (a default, not a rule).
+  const isDate = (v?: string) => !!v && /^\d{4}-\d{2}-\d{2}$/.test(v);
+  const weekStart = isDate(sp.week) ? sp.week! : sp.start === "today" ? today : isDate(sp.start) ? sp.start! : suggestedPlanStart(today, profile.preferences.food.shoppingDay);
   const wk = getWeek(weekStart);
-  const prevStart = addDays(weekStart, -7);
-  const prev = getWeek(prevStart) ?? (weekStart !== startOfWeek(today) ? getWeek(startOfWeek(today)) : null);
+  const plannedDays = wk?.spanDays ?? (sp.days && /^\d+$/.test(sp.days) ? Math.max(2, Math.min(14, Number(sp.days))) : 7);
+  const prev = listWeeks(6).find((w) => w.weekStart < weekStart && w.status !== "planning") ?? null;
+  const DAY_NAME = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  const resetLabel = new Date(today + "T00:00:00Z").getUTCDay() === profile.preferences.food.shoppingDay ? `${DAY_NAME[profile.preferences.food.shoppingDay]} reset` : "Weekly reset";
   const targets = resolveTargets(profile.preferences.nutrition, profile);
   const quests = getQuests(weekStart >= today ? weekStart : today).weekly;
   const pantry = listPantry().map((p) => ({ id: p.id, name: p.name, level: p.level, qty: p.qty, unit: p.unit }));
-  const weekLabel = `${formatShort(weekStart)} – ${formatShort(addDays(weekStart, 6))}`;
+  const weekLabel = `${formatShort(weekStart)} – ${formatShort(wk ? weekEnd(wk) : addDays(weekStart, plannedDays - 1))}`;
 
   return (
     <div className="page space-y-4">
-      <PageHeader title="Weekly preparation" subtitle={`Sunday reset · planning ${weekLabel}`} back="/planner" />
+      <PageHeader title={resetLabel} subtitle={`${wk?.kind === "supply" ? "Supply run" : "Planning"} ${weekLabel}${weekStart === today ? " · starting today" : ""}`} back="/planner" />
       <WeekPlanner
         today={today}
         initialStep={sp.step ?? null}
         weekStart={weekStart}
+        plannedDays={plannedDays}
         weekLabel={weekLabel}
         aiEnabled={isAiEnabled()}
         trainingDays={profile.preferences.fitness.trainingDays}
@@ -47,6 +53,8 @@ export default async function WeekPage({ searchParams }: { searchParams: Promise
           wk
             ? {
                 id: wk.id,
+                spanDays: wk.spanDays,
+                kind: wk.kind,
                 status: wk.status,
                 source: wk.source,
                 budget: wk.budget,

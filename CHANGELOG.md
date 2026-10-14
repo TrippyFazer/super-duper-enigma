@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.0 — 2026-10-14 · "Plans are defaults" (behavioral intelligence)
+
+No UX restructure. The system now understands planned / suggested / actual / available now / completed / skipped / rescheduled / no longer relevant. Details in `docs/behavior.md`.
+
+* **Flexible weekly rhythm**: plans start any day and cover any span; "Weekly reset" (labelled "<Preferred day> reset" on that day) can start now; Groceries always actionable with real states; **I'm shopping today** (3/5/7/custom days, budget, use pantry) builds a plan + list + Supply run quest; **Replan the next N days** regenerates only the remainder with the pantry and budget actually left. Weekly quests, reminders and prep dates follow the active plan, not a weekday.
+* **Today semantics**: protein hit is a success state, not "done eating"; explicit *Done eating for today*; last night's sleep is resolved whatever the number and shifts tonight's wind-down; steps distinguish syncing / actual zero / stale (last synced Xh ago) / not tracked; workout and food rows are time-aware without nagging; rest-day flag.
+* **Adventure quests**: real local events (Ticketmaster Discovery, public ICS calendars) cached and filtered deterministically (window, radius, transport time, cost preference, weather, novelty, interests + learned affinity), framed by AI only when configured, offered occasionally or on demand (**Find a quest**: now / tonight / weekend / surprise × cost). Cards show when, venue, distance, price, source and an *Open event* link. XP reflects novelty and activity, never ticket price. *Did you go?* → rating → cross-domain follow-up (market ingredient → pantry). Home area + radius in Settings, no GPS. **Create quest** with optional AI enhance. Honest fallbacks when sources fail.
+* 170 tests.
+
 ## 0.4.0 — 2026-10-13 · "Organize it" (UX refactor)
 
 Product review pass. No ranking logic changed; nothing deep removed. Full audit with problem / why / change in `docs/ux-audit.md`.

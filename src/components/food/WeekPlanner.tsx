@@ -70,7 +70,7 @@ export function WeekPlanner(p: WeekPlannerProps) {
 
       {step === "review" && <ReviewStep lastWeek={p.lastWeek} />}
       {step === "leftovers" && <LeftoversStep pantry={p.pantry} onDone={next} />}
-      {step === "budget" && <BudgetStep weekStart={p.weekStart} weekLabel={p.weekLabel} week={p.week} defaults={p.defaults} aiEnabled={p.aiEnabled} onGenerated={() => go("meals")} />}
+      {step === "budget" && <BudgetStep weekStart={p.weekStart} weekLabel={p.weekLabel} week={p.week} defaults={p.defaults} aiEnabled={p.aiEnabled} today={p.today} plannedDays={p.plannedDays ?? 7} onGenerated={() => go("meals")} />}
       {step === "meals" && <MealPlanStep week={p.week} onSetup={() => go("budget")} onNext={next} />}
       {step === "shop" && <GroceryStep week={p.week} onSetup={() => go("budget")} onNext={next} />}
       {step === "prep" && <PrepStep week={p.week} onNext={next} />}

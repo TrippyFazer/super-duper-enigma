@@ -1,7 +1,8 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/db/client";
-import { groceryWeeks, mealPrepSessions, notifications, workoutSessions } from "@/db/schema";
-import { addDays, hhmmToMinutes, startOfWeek } from "@/lib/dates";
+import { mealPrepSessions, notifications, workoutSessions } from "@/db/schema";
+import { addDays, hhmmToMinutes } from "@/lib/dates";
+import { activeWeekRow, nextWeekRow, weekEnd } from "./foodWeek";
 import { buildMorningMessage, motivationInput, rememberMessage } from "./motivation";
 import { pushNotification } from "./notifications";
 import { getProfile, type ProfileView } from "./profile";
@@ -71,18 +72,20 @@ export function runScheduledNotifications(profile: ProfileView = getProfile()): 
     }
   }
 
-  // Sunday: weekly planning + meal-prep reminder.
-  if (weekday === prefs.food.shoppingDay) {
-    if (n.weeklyPlanning && due(n.weeklyPlanningTime, 240)) {
-      const key = `n:weeklyplan:${today}`;
-      const wk = getDb().select().from(groceryWeeks).where(eq(groceryWeeks.weekStart, addDays(startOfWeek(today), 7))).get();
-      if (!wk || wk.status === "planning") pushNotification(n, { kind: "system", title: "Prepare for the week ahead", body: "Weekly planning is ready: review, leftovers, budget, meals, shopping list, prep.", href: "/planner/week", key });
-      fired.push(key);
-    }
-    if (n.mealPrepReminder && due("15:00", 300)) {
-      const key = `n:mealprep:${today}`;
-      const prep = getDb().select().from(mealPrepSessions).where(and(eq(mealPrepSessions.date, today), eq(mealPrepSessions.status, "planned"))).get();
-      if (prep) pushNotification(n, { kind: "meals", title: "Sunday prep is planned", body: `${prep.estimatedMinutes} min of prep sets up the week. +60 XP when done.`, href: "/planner/week", key });
+  // Preferred planning day: suggest the weekly reset (a default, never a gate — the reset can start any day).
+  if (weekday === prefs.food.shoppingDay && n.weeklyPlanning && due(n.weeklyPlanningTime, 240)) {
+    const key = `n:weeklyplan:${today}`;
+    const wk = activeWeekRow(today) ?? nextWeekRow(today);
+    const covered = wk && wk.status !== "planning" && weekEnd(wk) >= addDays(today, 3);
+    if (!covered) pushNotification(n, { kind: "system", title: "Weekly reset", body: "Review, leftovers, budget, meals, shopping list, prep — whenever suits you today.", href: "/planner/week", key });
+    fired.push(key);
+  }
+  // Meal-prep reminder: on the day the prep is planned for, whatever weekday that is.
+  if (n.mealPrepReminder && due("15:00", 300)) {
+    const key = `n:mealprep:${today}`;
+    const prep = getDb().select().from(mealPrepSessions).where(and(eq(mealPrepSessions.date, today), eq(mealPrepSessions.status, "planned"))).get();
+    if (prep && !exists(key)) {
+      pushNotification(n, { kind: "meals", title: "Meal prep is planned for today", body: `${prep.estimatedMinutes} min of prep sets up the next days. +60 XP when done.`, href: "/planner/week?step=prep", key });
       fired.push(key);
     }
   }

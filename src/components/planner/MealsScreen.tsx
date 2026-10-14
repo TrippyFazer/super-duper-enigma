@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus } from "lucide-react";
+import { Plus, Check, Undo2 } from "lucide-react";
+import { setDayFlagAction } from "@/actions/planner";
 import { useFeedback } from "@/components/feedback/FeedbackProvider";
 import { MealPlanView, type MealVM } from "./MealPlanView";
 import { AdjustDayCard } from "./AdjustDayCard";
@@ -27,6 +28,8 @@ export function MealsScreen(props: {
   aiEnabled: boolean;
   openLog?: boolean;
   adjustFor?: string | null;
+  /** explicit "done eating for today" */
+  finished?: boolean;
 }) {
   const router = useRouter();
   const { notify } = useFeedback();
@@ -34,6 +37,12 @@ export function MealsScreen(props: {
   const [adjustFor, setAdjustFor] = useState<string | null>(props.adjustFor ?? null);
   const [details, setDetails] = useState(false);
   const [showDone, setShowDone] = useState(false);
+  const [finished, setFinished] = useState(!!props.finished);
+  const toggleFinished = () => {
+    const next = !finished;
+    setFinished(next);
+    setDayFlagAction("food_finished", next).then(() => router.refresh());
+  };
   const plannedSlots: PlannedSlot[] = (props.plan?.meals ?? []).filter((m) => m.status === "planned" || m.status === "prepared").map((m) => ({ id: m.id, mealType: m.mealType, name: m.name, calories: m.calories }));
   const { totals, targets } = props;
   const proteinLeft = Math.max(0, targets.protein - totals.protein);
@@ -56,11 +65,17 @@ export function MealsScreen(props: {
             <div className="mt-1 h-2 overflow-hidden rounded-full bg-black/40">
               <div className="h-full rounded-full bg-success" style={{ width: `${Math.min(100, (totals.protein / Math.max(1, targets.protein)) * 100)}%` }} />
             </div>
-            <div className="mt-1.5 text-[12.5px] text-muted">{totals.protein >= targets.protein && targets.protein > 0 ? "Protein target hit ✓" : `${proteinLeft} g protein to go`}</div>
+            <div className="mt-1.5 text-[12.5px] text-muted">{finished ? "Done for today ✓" : totals.protein >= targets.protein && targets.protein > 0 ? "Protein goal hit ✓ · the day stays open" : `${proteinLeft} g protein to go`}</div>
             <button onClick={() => setDetails((v) => !v)} aria-expanded={details} className="press -ml-1 mt-0.5 h-8 px-1 text-[11px] text-faint">
               {details ? "Hide details" : "Carbs · fat · targets"}
             </button>
           </div>
+        </div>
+        <div className="mt-2 flex items-center gap-2 border-t border-border/60 pt-2">
+          <button onClick={toggleFinished} aria-pressed={finished} className={cx("press flex h-9 items-center gap-1 rounded-full border px-3 text-xs", finished ? "border-success/50 bg-success/10 text-success" : "border-border text-text-2")}>
+            {finished ? <Undo2 size={12} /> : <Check size={12} />} {finished ? "Reopen the day" : "Done eating for today"}
+          </button>
+          <span className="text-[11px] text-faint">{finished ? "Food is settled for today" : "Hitting protein doesn't close the day"}</span>
         </div>
         {details && (
           <div className="mt-2 grid grid-cols-2 gap-3 border-t border-border/60 pt-2 text-[12px] text-muted">

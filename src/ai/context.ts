@@ -8,6 +8,7 @@ import type { ProfileView } from "@/services/profile";
 import { listPersonalRecords, recentSessions } from "@/services/workouts";
 import { expiringSoon, listPantry, servingsOnHand } from "@/services/pantry";
 import { getDb } from "@/db/client";
+import { activeWeekRow } from "@/services/foodWeek";
 import { groceryWeeks, nutritionEntries } from "@/db/schema";
 import { and, desc, eq, gte } from "drizzle-orm";
 import { startOfWeek } from "@/lib/dates";
@@ -117,7 +118,7 @@ export function buildAiContext(profile: ProfileView, prefs: Preferences, assessm
       remainingProtein: targets.protein - totals.protein,
       timeAvailableMin: prefs.nutrition.maxPrepMin,
       budgetRemaining: (() => {
-        const wk = getDb().select().from(groceryWeeks).where(eq(groceryWeeks.weekStart, startOfWeek(today))).orderBy(desc(groceryWeeks.id)).get();
+        const wk = activeWeekRow(today);
         return wk ? Math.round((wk.budget - (wk.actualCost ?? wk.estimatedCost ?? 0)) * 100) / 100 : null;
       })(),
       recentMeals: getDb().select({ name: nutritionEntries.name }).from(nutritionEntries).where(and(gte(nutritionEntries.date, addDays(today, -3)))).orderBy(desc(nutritionEntries.id)).limit(12).all().map((r) => r.name),

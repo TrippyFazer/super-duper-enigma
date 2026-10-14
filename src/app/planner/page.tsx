@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { Dumbbell, UtensilsCrossed, ChefHat, MessageCircle, ChevronRight, CalendarRange, Package, ShoppingBasket, History, Check } from "lucide-react";
-import { getWeek, planningWeekStart, weekFeedback } from "@/services/foodWeek";
+import { Dumbbell, UtensilsCrossed, ChefHat, MessageCircle, ChevronRight, CalendarRange, Package, History, Check } from "lucide-react";
+import { relevantWeek, suggestedPlanStart, weekEnd, weekFeedback } from "@/services/foodWeek";
+import { GroceryActions, type GroceryState } from "@/components/food/GroceryActions";
 import { pantryCount } from "@/services/pantry";
 import { addDays, formatShort, startOfWeek, weekday } from "@/lib/dates";
 import { WeekFeedbackCard } from "@/components/food/WeekFeedbackCard";
@@ -24,8 +25,25 @@ export default function PlannerPage() {
   const plan = todayPlanSummary(profile);
   const ai = isAiEnabled();
   const ws = startOfWeek(today);
-  const thisWeek = getWeek(ws);
-  const planningWeek = getWeek(planningWeekStart(today, profile.preferences.food.shoppingDay));
+  const planningWeek = relevantWeek(today);
+  const thisWeek = planningWeek && planningWeek.weekStart <= today ? planningWeek : null;
+  const DAY_NAME = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  const preferredDay = profile.preferences.food.shoppingDay;
+  const resetLabel = weekday(today) === preferredDay ? `${DAY_NAME[preferredDay]} reset` : "Weekly reset";
+  const daysLeft = planningWeek && planningWeek.weekStart <= today ? Math.max(0, Math.round((new Date(weekEnd(planningWeek) + "T00:00:00Z").getTime() - new Date(today + "T00:00:00Z").getTime()) / 86_400_000) + 1) : 0;
+  const grocery: GroceryState = {
+    state: !planningWeek || planningWeek.status === "planning" ? "none" : planningWeek.status === "planned" ? "planned" : "shopped",
+    weekId: planningWeek?.id ?? null,
+    weekStart: planningWeek?.weekStart ?? null,
+    endDate: planningWeek ? weekEnd(planningWeek) : null,
+    itemCount: planningWeek?.totals.itemCount ?? 0,
+    purchased: planningWeek?.totals.purchased ?? 0,
+    estimated: planningWeek?.totals.estimated ?? 0,
+    actual: planningWeek?.actualCost ?? null,
+    budget: planningWeek?.budget ?? profile.preferences.food.weeklyBudget,
+    daysLeft,
+    replannedFrom: planningWeek?.summaryParsed.replannedFrom ?? null,
+  };
   const pantryN = pantryCount();
   const trained = new Set(loadWorkoutsBetween(ws, addDays(ws, 6)).map((w) => w.date));
   const trainingDays = profile.preferences.fitness.trainingDays;
@@ -33,7 +51,6 @@ export default function PlannerPage() {
   const mealsThisWeek = thisWeek ? thisWeek.days.reduce((a, d) => a + d.meals.filter((m) => m.status === "planned" || m.status === "prepared").length, 0) : 0;
 
   const weekStatus = planningWeek && planningWeek.status !== "planning" ? planningWeek.status : null;
-  const groceriesSub = !planningWeek || planningWeek.status === "planning" ? "List appears after the week is planned" : planningWeek.status === "planned" ? `${planningWeek.totals.itemCount} items · ~$${planningWeek.totals.estimated.toFixed(0)} est.` : `${planningWeek.totals.purchased} bought · $${planningWeek.totals.actual.toFixed(0)} spent`;
   const prepSub = !planningWeek?.prep ? "After planning" : planningWeek.prep.status === "completed" ? "Done ✓" : `${planningWeek.prep.estimatedMinutes} min planned`;
 
   const Tile = ({ href, icon: Icon, title, sub, done }: { href: string; icon: typeof Dumbbell; title: string; sub: string; done?: boolean }) => (
@@ -89,9 +106,9 @@ export default function PlannerPage() {
         <section>
           <SectionTitle>Weekly preparation</SectionTitle>
           <div className="space-y-2.5">
-            <Tile href="/planner/week" icon={CalendarRange} title="Sunday reset" sub={weekStatus ? `Week of ${formatShort(planningWeek!.weekStart)} · ${weekStatus}` : "Plan the week's meals, budget and list"} done={!!weekStatus} />
-            <Tile href="/planner/week?step=shop" icon={ShoppingBasket} title="Groceries" sub={groceriesSub} done={planningWeek?.status === "shopped" || planningWeek?.status === "reviewed"} />
-            <Tile href="/planner/week?step=prep" icon={ChefHat} title="Meal prep" sub={prepSub} done={planningWeek?.prep?.status === "completed"} />
+            <Tile href={weekStatus ? `/planner/week?week=${planningWeek!.weekStart}` : `/planner/week?start=${suggestedPlanStart(today, preferredDay) <= today ? "today" : suggestedPlanStart(today, preferredDay)}`} icon={CalendarRange} title={resetLabel} sub={weekStatus ? `${planningWeek!.kind === "supply" ? "Supply run" : "Plan"} ${formatShort(planningWeek!.weekStart)} – ${formatShort(weekEnd(planningWeek!))} · ${weekStatus}${grocery.replannedFrom ? " · replanned" : ""}` : "Start any time: pantry, budget, meals, list, prep"} done={!!weekStatus} />
+            <GroceryActions g={grocery} defaultBudget={profile.preferences.food.weeklyBudget} />
+            <Tile href={`/planner/week${planningWeek ? `?week=${planningWeek.weekStart}&step=prep` : "?step=prep"}`} icon={ChefHat} title="Meal prep" sub={prepSub} done={planningWeek?.prep?.status === "completed"} />
           </div>
           {thisWeek && thisWeek.status !== "planning" && (
             <div className="mt-2.5">

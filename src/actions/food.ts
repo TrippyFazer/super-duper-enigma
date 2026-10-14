@@ -5,6 +5,7 @@ import { z } from "zod";
 import * as fw from "@/services/foodWeek";
 import * as pantry from "@/services/pantry";
 import { getProfile, updateProfile } from "@/services/profile";
+import { offerSupplyRun } from "@/services/questOffers";
 import { reconcile } from "@/services/progression";
 import type { ActionFeedback } from "./index";
 
@@ -14,8 +15,8 @@ const revalidate = () => {
 const mealsNeededSchema = z.object({ breakfast: z.coerce.number().int().min(0).max(7), lunch: z.coerce.number().int().min(0).max(7), dinner: z.coerce.number().int().min(0).max(7), snacks: z.coerce.number().int().min(0).max(3), eatingOut: z.coerce.number().int().min(0).max(14) });
 const weekPrefsSchema = z.object({ quickWeekdays: z.boolean(), mealPrep: z.boolean(), highProtein: z.boolean(), reuseIngredients: z.boolean(), notes: z.string().max(300).optional() });
 
-export async function upsertWeekAction(input: { weekStart: string; budget: number; budgetMode: "budget" | "balanced" | "flexible"; calorieTarget: number; proteinTarget: number; mealsNeeded: z.input<typeof mealsNeededSchema>; prefs: z.input<typeof weekPrefsSchema> }) {
-  const s = z.object({ weekStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), budget: z.coerce.number().min(0).max(2000), budgetMode: z.enum(["budget", "balanced", "flexible"]), calorieTarget: z.coerce.number().int().min(1000).max(6000), proteinTarget: z.coerce.number().int().min(30).max(400), mealsNeeded: mealsNeededSchema, prefs: weekPrefsSchema }).parse(input);
+export async function upsertWeekAction(input: { weekStart: string; days?: number; budget: number; budgetMode: "budget" | "balanced" | "flexible"; calorieTarget: number; proteinTarget: number; mealsNeeded: z.input<typeof mealsNeededSchema>; prefs: z.input<typeof weekPrefsSchema> }) {
+  const s = z.object({ weekStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), days: z.coerce.number().int().min(2).max(14).optional(), budget: z.coerce.number().min(0).max(2000), budgetMode: z.enum(["budget", "balanced", "flexible"]), calorieTarget: z.coerce.number().int().min(1000).max(6000), proteinTarget: z.coerce.number().int().min(30).max(400), mealsNeeded: mealsNeededSchema, prefs: weekPrefsSchema }).parse(input);
   const wk = fw.upsertWeek(s);
   // Remember the budget and preferences for next time.
   updateProfile({ preferences: { food: { weeklyBudget: s.budget, budgetMode: s.budgetMode, quickWeekdays: s.prefs.quickWeekdays, mealPrep: s.prefs.mealPrep, highProtein: s.prefs.highProtein, reuseIngredients: s.prefs.reuseIngredients, eatingOutPerWeek: s.mealsNeeded.eatingOut } } });
@@ -114,4 +115,33 @@ export async function saveTrainingDaysAction(days: number[]) {
   const d = z.array(z.number().int().min(0).max(6)).max(7).parse(days);
   updateProfile({ preferences: { fitness: { trainingDays: d, daysPerWeek: Math.max(1, d.length || getProfile().preferences.fitness.daysPerWeek) } } });
   revalidate();
+}
+
+/** "I'm shopping today": plan N days from today, build the list, and accept a Supply run quest. No preferred-day gate. */
+export async function startSupplyRunAction(input: { days: number; budget: number; usePantry: boolean }): Promise<{ ok: boolean; weekStart?: string; weekId?: number; source?: "ai" | "template"; estimatedCost?: number | null; error?: string }> {
+  try {
+    const s = z.object({ days: z.coerce.number().int().min(2).max(14), budget: z.coerce.number().min(0).max(2000), usePantry: z.boolean() }).parse(input);
+    const p = getProfile();
+    const r = await fw.startSupplyRun({ today: p.today, days: s.days, budget: s.budget, usePantry: s.usePantry, profile: p });
+    offerSupplyRun({ today: p.today, now: new Date(), weekId: r.week.id, days: s.days, budget: s.budget });
+    updateProfile({ preferences: { food: { weeklyBudget: s.days >= 6 ? s.budget : p.preferences.food.weeklyBudget } } });
+    reconcile();
+    revalidate();
+    return { ok: true, weekStart: r.week.weekStart, weekId: r.week.id, source: r.source, estimatedCost: r.week.estimatedCost, error: r.error };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+}
+
+/** Replan only the rest of the current plan from today, with the pantry and the budget actually left. */
+export async function replanRemainderAction(weekId: number): Promise<{ ok: boolean; daysReplanned?: number; budgetLeft?: number; source?: "ai" | "template"; error?: string }> {
+  try {
+    const p = getProfile();
+    const r = await fw.replanRemainder(z.number().int().parse(weekId), p.today);
+    reconcile();
+    revalidate();
+    return { ok: true, daysReplanned: r.daysReplanned, budgetLeft: r.budgetLeft, source: r.source, error: r.error };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
 }

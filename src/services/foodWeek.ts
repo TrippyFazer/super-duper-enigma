@@ -1,6 +1,7 @@
 import { and, desc, eq, gte, inArray, lte } from "drizzle-orm";
 import { getDb } from "@/db/client";
-import { groceryItems, groceryWeeks, mealPrepSessions, meals, nutritionEntries, plannedMeals, type GroceryItem, type GroceryWeek, type MealPrepSession } from "@/db/schema";
+import { groceryItems, groceryWeeks, mealPrepSessions, meals, nutritionEntries, plannedMeals, questOffers, type GroceryItem, type GroceryWeek, type MealPrepSession } from "@/db/schema";
+import { completeOffer } from "./questOffers";
 import { addDays, startOfWeek, weekday, type ISODate } from "@/lib/dates";
 import { parseJson, toJson } from "@/lib/json";
 import { buildAiContext } from "@/ai/context";
@@ -16,12 +17,41 @@ import { dayTotals, getMealPlan, logNutrition, resolveTargets, setPlannedMealSta
 import { awardXp, voidXpForSource } from "./xp";
 
 // ------------------------------------------------------------- helpers ----
-/** The week a Sunday plan is for: the upcoming Mon–Sun when planning on Sat/Sun, otherwise the current week. */
+/**
+ * Where the app *suggests* a regular weekly plan should start: the upcoming
+ * Mon–Sun when planning on Sat/Sun or the preferred shopping day, otherwise
+ * the current week. This is a default, never a gate — plans can start any day.
+ */
 export function planningWeekStart(today: ISODate, shoppingDay = 0): ISODate {
   const wd = weekday(today);
   const cur = startOfWeek(today);
   if (wd === 0 || wd === 6 || wd === shoppingDay) return addDays(cur, wd === 0 || wd === 6 ? 7 : 0);
   return cur;
+}
+export const suggestedPlanStart = planningWeekStart;
+
+/** Last day a plan covers (inclusive). */
+export function weekEnd(row: { weekStart: ISODate; spanDays: number }): ISODate {
+  return addDays(row.weekStart, Math.max(1, row.spanDays) - 1);
+}
+
+/** The plan that covers `today`, newest first (a supply run started mid-week wins over the regular week). */
+export function activeWeekRow(today: ISODate): GroceryWeek | null {
+  const rows = getDb().select().from(groceryWeeks).where(lte(groceryWeeks.weekStart, today)).orderBy(desc(groceryWeeks.id)).all();
+  return rows.find((r) => weekEnd(r) >= today) ?? null;
+}
+/** The soonest plan that starts after today. */
+export function nextWeekRow(today: ISODate): GroceryWeek | null {
+  return getDb().select().from(groceryWeeks).where(gte(groceryWeeks.weekStart, addDays(today, 1))).orderBy(groceryWeeks.weekStart).get() ?? null;
+}
+/** The plan the Planner / Home should talk about right now: active, else the next one. */
+export function relevantWeek(today: ISODate): WeekView | null {
+  const row = activeWeekRow(today) ?? nextWeekRow(today);
+  return row ? viewWeek(row) : null;
+}
+export function activeWeek(today: ISODate): WeekView | null {
+  const row = activeWeekRow(today);
+  return row ? viewWeek(row) : null;
 }
 
 export interface WeekView extends GroceryWeek {
@@ -43,6 +73,7 @@ export interface WeekSummary {
   leftoversCarried?: number;
   coveredByPantry?: number;
   source?: string;
+  replannedFrom?: string;
 }
 
 export function getWeek(weekStart: ISODate): WeekView | null {
@@ -63,7 +94,7 @@ function viewWeek(row: GroceryWeek): WeekView {
   const db = getDb();
   const items = db.select().from(groceryItems).where(eq(groceryItems.weekId, row.id)).orderBy(groceryItems.id).all();
   const prep = db.select().from(mealPrepSessions).where(eq(mealPrepSessions.weekId, row.id)).orderBy(desc(mealPrepSessions.id)).get() ?? null;
-  const dates = Array.from({ length: 7 }, (_, i) => addDays(row.weekStart, i));
+  const dates = Array.from({ length: Math.max(1, row.spanDays ?? 7) }, (_, i) => addDays(row.weekStart, i));
   const days = dates.map((date) => ({ date, meals: getMealPlan(date)?.meals.filter((m) => m.weekId === row.id || !m.weekId) ?? [] }));
   const estimated = items.filter((i) => !i.skipped && !i.coveredByPantry).reduce((a, i) => a + (i.estPrice ?? 0), 0);
   const actual = items.filter((i) => i.purchased).reduce((a, i) => a + (i.actualPrice ?? i.estPrice ?? 0), 0);
@@ -83,24 +114,65 @@ function viewWeek(row: GroceryWeek): WeekView {
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
 // --------------------------------------------------------------- setup ----
-export function upsertWeek(input: { weekStart: ISODate; budget: number; budgetMode: "budget" | "balanced" | "flexible"; calorieTarget: number; proteinTarget: number; mealsNeeded: MealsNeeded; prefs: WeekPrefs }): WeekView {
+export function upsertWeek(input: { weekStart: ISODate; days?: number; kind?: "week" | "supply"; budget: number; budgetMode: "budget" | "balanced" | "flexible"; calorieTarget: number; proteinTarget: number; mealsNeeded: MealsNeeded; prefs: WeekPrefs }): WeekView {
   const db = getDb();
-  const values = { weekStart: input.weekStart, budget: input.budget, budgetMode: input.budgetMode, calorieTarget: input.calorieTarget, proteinTarget: input.proteinTarget, mealsNeeded: toJson(input.mealsNeeded), prefs: toJson(input.prefs) };
-  const cur = db.select().from(groceryWeeks).where(eq(groceryWeeks.weekStart, input.weekStart)).get();
+  const values = { weekStart: input.weekStart, spanDays: Math.max(1, Math.min(14, input.days ?? 7)), kind: input.kind ?? "week", budget: input.budget, budgetMode: input.budgetMode, calorieTarget: input.calorieTarget, proteinTarget: input.proteinTarget, mealsNeeded: toJson(input.mealsNeeded), prefs: toJson(input.prefs) };
+  const cur = db.select().from(groceryWeeks).where(eq(groceryWeeks.weekStart, input.weekStart)).orderBy(desc(groceryWeeks.id)).get();
   if (cur) db.update(groceryWeeks).set(values).where(eq(groceryWeeks.id, cur.id)).run();
   else db.insert(groceryWeeks).values({ ...values, status: "planning" }).run();
   return getWeek(input.weekStart)!;
 }
 
+/** Meals needed for an N-day plan, scaled from the usual weekly preferences. */
+export function mealsNeededForDays(days: number, eatingOutPerWeek: number): MealsNeeded {
+  const eatingOut = Math.min(days, Math.round((eatingOutPerWeek * days) / 7));
+  return { breakfast: days, lunch: Math.max(1, Math.round(days * 0.75)), dinner: Math.max(1, days - eatingOut), snacks: 1, eatingOut };
+}
+
+/**
+ * "I'm shopping today": a plan that starts today and covers the next N days.
+ * No preferred-day gate — the schedule exists to help, not to be obeyed.
+ */
+export async function startSupplyRun(input: { today: ISODate; days: number; budget: number; usePantry: boolean; profile?: ProfileView }): Promise<{ week: WeekView; source: "ai" | "template"; error?: string }> {
+  const profile = input.profile ?? getProfile();
+  const targets = resolveTargets(profile.preferences.nutrition, profile);
+  const f = profile.preferences.food;
+  const days = Math.max(2, Math.min(14, input.days));
+  const wk = upsertWeek({ weekStart: input.today, days, kind: "supply", budget: input.budget, budgetMode: f.budgetMode, calorieTarget: targets.calories, proteinTarget: targets.protein, mealsNeeded: mealsNeededForDays(days, f.eatingOutPerWeek), prefs: { quickWeekdays: f.quickWeekdays, mealPrep: f.mealPrep, highProtein: f.highProtein, reuseIngredients: f.reuseIngredients } });
+  const r = await generateWeekPlan(wk.id, { force: true, ignorePantry: !input.usePantry });
+  return { week: r.week, source: r.source, error: r.error };
+}
+
+/**
+ * Mid-plan replan: regenerate only the days from `today` onward using what is
+ * in the pantry and the budget that is actually left. Earlier days are untouched.
+ */
+export async function replanRemainder(weekId: number, today: ISODate): Promise<{ week: WeekView; source: "ai" | "template"; error?: string; daysReplanned: number; budgetLeft: number }> {
+  const wk = getWeekById(weekId);
+  if (!wk) throw new Error("Week not found");
+  const end = weekEnd(wk);
+  const from = today > wk.weekStart ? today : wk.weekStart;
+  if (from > end) throw new Error("This plan is over — start a new one.");
+  const daysLeft = Math.round((new Date(end + "T00:00:00Z").getTime() - new Date(from + "T00:00:00Z").getTime()) / 86_400_000) + 1;
+  const spent = wk.actualCost ?? 0;
+  const budgetLeft = Math.max(0, round2(wk.budget - spent));
+  const r = await generateWeekPlan(weekId, { force: true, fromDate: from, days: daysLeft, budget: budgetLeft, replan: true });
+  return { week: r.week, source: r.source, error: r.error, daysReplanned: daysLeft, budgetLeft };
+}
+
 // ------------------------------------------------------------ generate ----
 /** Build (or rebuild) the week: planned meals for each day, the shopping list, the prep session. */
-export async function generateWeekPlan(weekId: number, opts: { force?: boolean } = {}): Promise<{ week: WeekView; source: "ai" | "template"; error?: string }> {
+export async function generateWeekPlan(weekId: number, opts: { force?: boolean; ignorePantry?: boolean; /** replan only from this date onward */ fromDate?: ISODate; /** days to plan from fromDate (defaults to the rest of the plan) */ days?: number; /** budget for the replanned stretch */ budget?: number; /** this is a mid-plan replan (keeps shopped status, records replannedFrom) */ replan?: boolean } = {}): Promise<{ week: WeekView; source: "ai" | "template"; error?: string }> {
   const db = getDb();
   const profile = getProfile();
   const wk = getWeekById(weekId);
   if (!wk) throw new Error("Week not found");
+  const from = opts.fromDate ?? wk.weekStart;
+  const days = opts.days ?? Math.max(1, wk.spanDays - Math.round((new Date(from + "T00:00:00Z").getTime() - new Date(wk.weekStart + "T00:00:00Z").getTime()) / 86_400_000));
+  const scale = days / Math.max(1, wk.spanDays);
+  const needed: MealsNeeded = scale === 1 ? wk.mealsNeededParsed : { breakfast: Math.max(1, Math.round(wk.mealsNeededParsed.breakfast * scale)), lunch: Math.max(1, Math.round(wk.mealsNeededParsed.lunch * scale)), dinner: Math.max(1, Math.round(wk.mealsNeededParsed.dinner * scale)), snacks: wk.mealsNeededParsed.snacks, eatingOut: Math.round(wk.mealsNeededParsed.eatingOut * scale) };
   const recipes = loadRecipes().map((r) => ({ id: r.id, name: r.name, mealType: r.mealType, calories: r.calories, proteinG: r.proteinG, carbsG: r.carbsG, fatG: r.fatG, tags: r.tagsParsed, ingredients: r.ingredientsParsed, prepTimeMin: r.prepTimeMin, cookTimeMin: r.cookTimeMin, isFavorite: r.isFavorite }));
-  const pantry = listPantry().map((p) => ({ name: p.name, servings: servingsOnHand(p) }));
+  const pantry = opts.ignorePantry ? [] : listPantry().map((p) => ({ name: p.name, servings: servingsOnHand(p) }));
   const ctx = buildAiContext(profile, profile.preferences, getAssessment(profile));
   const recent = db
     .select({ recipeId: plannedMeals.recipeId })
@@ -109,18 +181,22 @@ export async function generateWeekPlan(weekId: number, opts: { force?: boolean }
     .all()
     .map((r) => r.recipeId)
     .filter((x): x is number => x != null);
-  const r = await generateWeekAi(ctx, { weekStart: wk.weekStart, recipes, prefs: profile.preferences.nutrition, week: wk.prefsParsed, mealsNeeded: wk.mealsNeededParsed, calorieTarget: wk.calorieTarget, proteinTarget: wk.proteinTarget, budget: wk.budget, budgetMode: wk.budgetMode as "budget", pantry, seed: Number(wk.weekStart.replace(/-/g, "")) + (opts.force ? Date.now() % 997 : 0), recentRecipeIds: recent, force: opts.force });
-  applyGeneratedWeek(wk, r.plan, r.source);
+  const r = await generateWeekAi(ctx, { weekStart: from, days, recipes, prefs: profile.preferences.nutrition, week: wk.prefsParsed, mealsNeeded: needed, calorieTarget: wk.calorieTarget, proteinTarget: wk.proteinTarget, budget: opts.budget ?? wk.budget, budgetMode: wk.budgetMode as "budget", pantry, seed: Number(from.replace(/-/g, "")) + (opts.force ? Date.now() % 997 : 0), recentRecipeIds: recent, force: opts.force });
+  applyGeneratedWeek(wk, r.plan, r.source, { fromDate: from, days, today: profile.today, replan: opts.replan });
   return { week: getWeekById(weekId)!, source: r.source, error: r.error };
 }
 
-export function applyGeneratedWeek(wk: WeekView, plan: GeneratedWeek, source: "ai" | "template") {
+export function applyGeneratedWeek(wk: WeekView, plan: GeneratedWeek, source: "ai" | "template", opts: { fromDate?: ISODate; days?: number; today?: ISODate; replan?: boolean } = {}) {
   const db = getDb();
+  const from = opts.fromDate ?? wk.weekStart;
+  const nDays = opts.days ?? wk.spanDays;
+  // A replan (explicit, or any regeneration that starts after the plan's first day) keeps history and status.
+  const partial = !!opts.replan || from !== wk.weekStart;
   // Planned meals per day (discarding only planned rows; eaten history is kept by saveMealPlan).
   const byDate = new Map<ISODate, GeneratedWeek["meals"]>();
   for (const m of plan.meals) byDate.set(m.date, [...(byDate.get(m.date) ?? []), m]);
-  for (let i = 0; i < 7; i++) {
-    const date = addDays(wk.weekStart, i);
+  for (let i = 0; i < nDays; i++) {
+    const date = addDays(from, i);
     const list = byDate.get(date) ?? [];
     const order = { breakfast: 0, lunch: 1, dinner: 2, snack: 3 };
     const sorted = [...list].sort((a, b) => order[a.mealType] - order[b.mealType]);
@@ -142,12 +218,17 @@ export function applyGeneratedWeek(wk: WeekView, plan: GeneratedWeek, source: "a
   for (const it of plan.shoppingList) {
     db.insert(groceryItems).values({ weekId: wk.id, name: it.name, category: it.category, qty: it.qty, unit: it.unit, estPrice: it.estPrice, usedIn: toJson(it.usedIn), coveredByPantry: it.coveredByPantry, note: it.note ?? null }).run();
   }
-  // Prep session (Sunday before the week, or the shopping day).
-  const prepDate = addDays(wk.weekStart, -1);
+  // Prep session: the day before the plan starts when planning ahead, otherwise today (a plan that starts today preps today).
+  const today = opts.today ?? wk.weekStart;
+  const prepDate = from > today ? addDays(from, -1) : today;
   db.delete(mealPrepSessions).where(and(eq(mealPrepSessions.weekId, wk.id), eq(mealPrepSessions.status, "planned"))).run();
   if (plan.prepPlan.length) db.insert(mealPrepSessions).values({ weekId: wk.id, date: prepDate, items: toJson(plan.prepPlan), estimatedMinutes: plan.prepMinutes, supports: toJson([...new Set(plan.prepPlan.flatMap((p) => p.supports))]) }).run();
-  const summary: WeekSummary = { reusePct: plan.reusePct, staplesAssumed: plan.staplesAssumed, rationale: plan.rationale, distinctRecipes: plan.distinctRecipes, coveredByPantry: plan.shoppingList.filter((i) => i.coveredByPantry).length, source };
-  db.update(groceryWeeks).set({ status: "planned", source, estimatedCost: plan.estimatedCost, summary: toJson(summary) }).where(eq(groceryWeeks.id, wk.id)).run();
+  const prev = wk.summaryParsed;
+  const summary: WeekSummary = { reusePct: plan.reusePct, staplesAssumed: plan.staplesAssumed, rationale: partial ? `Replanned from ${from}: ${plan.rationale}` : plan.rationale, distinctRecipes: plan.distinctRecipes, coveredByPantry: plan.shoppingList.filter((i) => i.coveredByPantry).length, source, leftoversCarried: prev.leftoversCarried, replannedFrom: partial ? from : undefined };
+  // A replan after shopping keeps the week "shopped"; otherwise it is (re)planned.
+  const status = partial && (wk.status === "shopped" || wk.status === "reviewed") ? wk.status : "planned";
+  const estimated = partial ? round2((wk.actualCost ?? 0) + plan.estimatedCost) : plan.estimatedCost;
+  db.update(groceryWeeks).set({ status, source, estimatedCost: estimated, summary: toJson(summary) }).where(eq(groceryWeeks.id, wk.id)).run();
 }
 
 // --------------------------------------------------------- shopping list ----
@@ -204,6 +285,9 @@ export function finishShopping(weekId: number, today: ISODate): WeekView {
   }
   recomputeActual(weekId);
   db.update(groceryWeeks).set({ status: "shopped", shoppedAt: new Date().toISOString() }).where(eq(groceryWeeks.id, weekId)).run();
+  // An accepted "Supply run" quest for this plan completes with the trip itself.
+  const run = db.select().from(questOffers).where(and(eq(questOffers.templateKey, "supply-run"), inArray(questOffers.status, ["accepted", "offered"]))).all().find((o) => parseJson<{ weekId?: number }>(o.params, {}).weekId === weekId);
+  if (run) completeOffer(run.id, today);
   return getWeekById(weekId)!;
 }
 
@@ -288,7 +372,7 @@ export interface WeekFeedback {
 
 export function weekFeedback(wk: WeekView, today: ISODate): WeekFeedback {
   const db = getDb();
-  const end = addDays(wk.weekStart, 6);
+  const end = weekEnd(wk);
   const cooked = db.select().from(meals).where(and(gte(meals.date, addDays(wk.weekStart, -1)), lte(meals.date, end))).all().length;
   const out = db.select().from(nutritionEntries).where(and(gte(nutritionEntries.date, wk.weekStart), lte(nutritionEntries.date, end), inArray(nutritionEntries.source, ["restaurant", "estimate"]))).all().length;
   const planned = wk.days.flatMap((d) => d.meals).filter((m) => m.status !== "replaced" && m.status !== "discarded" && m.date <= today);
@@ -317,7 +401,7 @@ export async function whatCanIEat(opts: { mealType?: "breakfast" | "lunch" | "di
   const pantry = listPantry().map((p) => p.name);
   const expiring = expiringSoon(today, 3).map((p) => p.name);
   const recipes = loadRecipes().map((r) => ({ id: r.id, name: r.name, mealType: r.mealType, calories: r.calories, proteinG: r.proteinG, carbsG: r.carbsG, fatG: r.fatG, tags: r.tagsParsed, ingredients: r.ingredientsParsed, prepTimeMin: r.prepTimeMin, cookTimeMin: r.cookTimeMin, isFavorite: r.isFavorite }));
-  const wk = getWeek(startOfWeek(today));
+  const wk = activeWeek(today);
   const recent = getDb().select({ name: nutritionEntries.name }).from(nutritionEntries).where(gte(nutritionEntries.date, addDays(today, -3))).all().map((r) => r.name);
   const ctx = buildAiContext(profile, profile.preferences, getAssessment(profile));
   const r = await suggestAi(ctx, { recipes, pantry, expiring, remainingCalories: targets.calories - totals.calories, remainingProtein: targets.protein - totals.protein, maxMinutes: opts.minutes ?? profile.preferences.nutrition.maxPrepMin, dislikes: profile.preferences.nutrition.dislikes, mealType: opts.mealType ?? "dinner", budgetRemaining: wk?.totals.remaining ?? null, recentMeals: recent });

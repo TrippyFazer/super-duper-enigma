@@ -88,8 +88,30 @@ export interface FoodPlanPrefs {
   eatingOutPerWeek: number;
 }
 
+export interface LocationPrefs {
+  /** free text the user typed: "Columbus, Ohio" / ZIP / region */
+  query: string | null;
+  city: string | null;
+  region: string | null;
+  lat: number | null;
+  lng: number | null;
+  radiusMi: number;
+}
+
+export interface AdventurePrefs {
+  /** adventure (event) quests on/off */
+  enabled: boolean;
+  costPref: "free" | "under20" | "under50" | "any";
+  /** interest key → love | interested | neutral | no */
+  interests: Record<string, "love" | "interested" | "neutral" | "no">;
+  /** learned category affinity from accepted/declined/rated quests, -2..2 */
+  learned: Record<string, number>;
+}
+
 export interface Preferences {
   fitness: FitnessPrefs;
+  location: LocationPrefs;
+  adventure: AdventurePrefs;
   nutrition: NutritionPrefs;
   questFrequency: QuestFrequency;
   notifications: NotificationPrefs;
@@ -108,11 +130,15 @@ export const DEFAULT_PREFERENCES: Preferences = {
   sleep: { wakeTarget: null, windDownMin: 30, fallAsleepMin: 15 },
   motivation: { recent: [] },
   food: { weeklyBudget: 80, budgetMode: "balanced", shoppingDay: 0, quickWeekdays: true, mealPrep: true, highProtein: true, reuseIngredients: true, eatingOutPerWeek: 2 },
+  location: { query: null, city: null, region: null, lat: null, lng: null, radiusMi: 10 },
+  adventure: { enabled: true, costPref: "under50", interests: {}, learned: {} },
 };
 
 export function mergePreferences(raw: Partial<Preferences> | null | undefined): Preferences {
   return {
     fitness: { ...DEFAULT_PREFERENCES.fitness, ...(raw?.fitness ?? {}) },
+    location: { ...DEFAULT_PREFERENCES.location, ...(raw?.location ?? {}) },
+    adventure: { ...DEFAULT_PREFERENCES.adventure, ...(raw?.adventure ?? {}), interests: { ...(raw?.adventure?.interests ?? {}) }, learned: { ...(raw?.adventure?.learned ?? {}) } },
     nutrition: { ...DEFAULT_PREFERENCES.nutrition, ...(raw?.nutrition ?? {}) },
     questFrequency: raw?.questFrequency ?? DEFAULT_PREFERENCES.questFrequency,
     notifications: { ...DEFAULT_PREFERENCES.notifications, ...(raw?.notifications ?? {}) },

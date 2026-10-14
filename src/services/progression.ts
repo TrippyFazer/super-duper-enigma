@@ -1,5 +1,6 @@
 import { and, desc, eq, gte, inArray, lte } from "drizzle-orm";
 import { getDb } from "@/db/client";
+import { activeWeekRow, nextWeekRow } from "./foodWeek";
 import { characterEvents, groceryWeeks, mealPrepSessions, quests, rankHistory, scoreSnapshots, userAchievements, type Quest } from "@/db/schema";
 import { pantryCount } from "./pantry";
 import { addDays, dateInTz, diffDays, endOfWeek, lastNDays, startOfWeek, hhmmToMinutes, type ISODate } from "@/lib/dates";
@@ -329,10 +330,9 @@ export function buildContext(profile: ProfileView, input: EngineInput, assessmen
     })(),
     food: (() => {
       const db = getDb();
-      // The week that "this week's" planning quest refers to: when planning ahead on Sat/Sun, the upcoming week also counts.
-      const candidates = [weekStart, addDays(weekStart, 7)];
-      const rows = db.select().from(groceryWeeks).where(inArray(groceryWeeks.weekStart, candidates)).all();
-      const wk = rows.find((r) => r.weekStart === weekStart && r.status !== "planning") ?? rows.find((r) => r.status !== "planning") ?? rows[0];
+      // The plan "this week's" quests refer to: whichever plan covers today, else the next one (a supply run started
+      // on a Wednesday counts exactly like a Sunday plan — the schedule is a default, not a rule).
+      const wk = activeWeekRow(today) ?? nextWeekRow(today);
       const prep = wk ? db.select().from(mealPrepSessions).where(and(eq(mealPrepSessions.weekId, wk.id), eq(mealPrepSessions.status, "completed"))).get() : null;
       const all = db.select().from(groceryWeeks).all();
       return {

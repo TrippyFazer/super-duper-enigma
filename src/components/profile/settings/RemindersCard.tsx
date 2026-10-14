@@ -69,8 +69,8 @@ export function RemindersCard({ qf, onQf, notif, onNotif }: { qf: QuestFrequency
           </div>
         )}
         <Row k="workoutReminder" label="Workout reminder" extra={notif.workoutReminder && <input type="time" value={notif.workoutReminderTime} onChange={(e) => onNotif({ ...notif, workoutReminderTime: e.target.value })} className={cx(inputClass, "w-auto py-1")} aria-label="Workout reminder time" />} />
-        <Row k="mealPrepReminder" label="Meal prep" sub="Sunday" />
-        <Row k="weeklyPlanning" label="Weekly planning" sub="Sunday" extra={notif.weeklyPlanning && <input type="time" value={notif.weeklyPlanningTime} onChange={(e) => onNotif({ ...notif, weeklyPlanningTime: e.target.value })} className={cx(inputClass, "w-auto py-1")} aria-label="Weekly planning time" />} />
+        <Row k="mealPrepReminder" label="Meal prep" sub="On the day prep is planned" />
+        <Row k="weeklyPlanning" label="Weekly reset" sub="On your preferred planning day" extra={notif.weeklyPlanning && <input type="time" value={notif.weeklyPlanningTime} onChange={(e) => onNotif({ ...notif, weeklyPlanningTime: e.target.value })} className={cx(inputClass, "w-auto py-1")} aria-label="Weekly planning time" />} />
         <p className="pt-1 text-[11px] text-muted">Device notifications are enabled from the Notices screen.</p>
       </Card>
     </>

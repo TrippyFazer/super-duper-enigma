@@ -17,7 +17,7 @@ export function PrepStep({ week: w, onNext }: { week: WeekVM | null; onNext: () 
   const prep = w?.prep ?? null;
   return (
     <section className="space-y-3">
-      <StepTitle eyebrow="Step 6" title="Sunday prep" body="Batch the parts that repeat." />
+      <StepTitle eyebrow="Step 6" title="Meal prep" body="Batch the parts that repeat." />
       {!prep ? (
         <div className="plate serif px-4 py-4 text-[14px] text-muted">No prep plan this week{w && w.status !== "planning" ? " — the recipes don't share enough to batch." : ". Plan the week first."}</div>
       ) : (

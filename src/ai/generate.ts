@@ -12,7 +12,7 @@ import { QUEST_LIBRARY } from "@/ranking/questLibrary";
 import { getProvider } from "./config";
 import type { AiContext } from "./context";
 import type { AiProvider } from "./provider";
-import { CoachReplySchema, DayAdjustSchema, FoodEstimateSchema, MealPlanSchema, QuestCandidateSchema, RecipeSuggestionSchema, WeeklyPlanSchema, WorkoutPlanSchema, type AiCoachReply, type AiFoodEstimate } from "./schemas";
+import { CoachReplySchema, DayAdjustSchema, EventQuestFramingSchema, FoodEstimateSchema, MealPlanSchema, QuestCandidateSchema, RecipeSuggestionSchema, UserQuestEnhanceSchema, WeeklyPlanSchema, WorkoutPlanSchema, type AiCoachReply, type AiFoodEstimate, type AiUserQuestEnhance } from "./schemas";
 import { generateTemplateWeek, shoppingListFromMeals, buildPrepPlan, type GeneratedWeek, type GenerateWeekInput, type WeekMeal } from "@/planner/weekTemplates";
 import { suggestFromPantryTemplate, type SuggestInput, type Suggestion } from "@/planner/pantrySuggest";
 import { canonicalName, findIngredient } from "@/food/ingredients";
@@ -297,7 +297,7 @@ export async function adjustDay(ctx: AiContext, input: { remaining: RemainingSlo
  * ingredient (AI prices only fill gaps). Falls back to the template planner.
  */
 export async function generateWeek(ctx: AiContext, input: GenerateWeekInput & { force?: boolean }): Promise<GenResult<GeneratedWeek>> {
-  const key = `week:${input.weekStart}:${hash({ b: input.budget, m: input.budgetMode, n: input.mealsNeeded, w: input.week, p: input.prefs, c: input.calorieTarget, pr: input.proteinTarget, pantry: input.pantry.map((p) => p.name).sort() })}`;
+  const key = `week:${input.weekStart}:${hash({ d: input.days ?? 7, b: input.budget, m: input.budgetMode, n: input.mealsNeeded, w: input.week, p: input.prefs, c: input.calorieTarget, pr: input.proteinTarget, pantry: input.pantry.map((p) => p.name).sort() })}`;
   if (!input.force) {
     const cached = readCache<{ plan: GeneratedWeek; source: "ai" | "template" }>("week", key);
     if (cached) return { ...cached, cached: true };
@@ -309,8 +309,8 @@ export async function generateWeek(ctx: AiContext, input: GenerateWeekInput & { 
         {
           system: SYSTEM_BASE + " You plan one week of meals for a home cook on a grocery budget. Optimise for ingredient reuse (few core ingredients used across many meals), low waste, convenience (quick weekday meals, batch prep), hitting calorie/protein targets, and staying within budget. Use the pantry first. Prices are rough US supermarket estimates.",
           user: [
-            `Week starting ${input.weekStart}. Budget $${input.budget} (${input.budgetMode}). Targets ${input.calorieTarget} kcal and ${input.proteinTarget} g protein per day.`,
-            `Meals needed: ${JSON.stringify(input.mealsNeeded)} (eatingOut = dinners NOT to plan, put them on Friday/Saturday). Preferences: ${JSON.stringify(input.week)}. Diet: ${input.prefs.dietPrefs.join(", ") || "none"}. Dislikes: ${input.prefs.dislikes.join(", ") || "none"}. Likes: ${input.prefs.likes.join(", ") || "none"}. Max prep ${input.prefs.maxPrepMin} min on weekdays.`,
+            `Plan ${input.days ?? 7} days starting ${input.weekStart} (dates ${input.weekStart} to ${addDaysIso(input.weekStart, (input.days ?? 7) - 1)}). Budget $${input.budget} (${input.budgetMode}). Targets ${input.calorieTarget} kcal and ${input.proteinTarget} g protein per day.`,
+            `Meals needed: ${JSON.stringify(input.mealsNeeded)} (eatingOut = dinners NOT to plan; prefer Friday/Saturday when those dates are in range). Preferences: ${JSON.stringify(input.week)}. Diet: ${input.prefs.dietPrefs.join(", ") || "none"}. Dislikes: ${input.prefs.dislikes.join(", ") || "none"}. Likes: ${input.prefs.likes.join(", ") || "none"}. Max prep ${input.prefs.maxPrepMin} min on weekdays.`,
             `Pantry on hand (do not buy these unless more is needed): ${input.pantry.map((p) => `${p.name}${p.servings != null ? ` (~${p.servings} servings)` : ""}`).join(", ") || "nothing recorded"}.`,
             `Saved recipes you may reuse by exact name: ${input.recipes.slice(0, 40).map((r) => `${r.name} [${r.mealType}, ${r.calories} kcal, ${r.proteinG} g, ${r.ingredients.join("/")}]`).join("; ")}.`,
             "Return JSON {rationale, days[{date, meals[{mealType, name, calories, protein, carbs, fat, ingredients[{name, qty, unit}], prepMinutes, prepAhead}]}], shoppingList[{name, category, qty, unit, estPrice, usedIn[]}], prepPlan[{name, servings, minutes, supports[]}]}. Keep to ~10-14 distinct ingredients beyond staples. Leftover lunches should be named 'Leftover <dinner>'.",
@@ -322,7 +322,7 @@ export async function generateWeek(ctx: AiContext, input: GenerateWeekInput & { 
       );
       const meals: WeekMeal[] = [];
       for (const day of out.days) {
-        if (day.date < input.weekStart || day.date > addDaysIso(input.weekStart, 6)) continue;
+        if (day.date < input.weekStart || day.date > addDaysIso(input.weekStart, (input.days ?? 7) - 1)) continue;
         for (const m of day.meals) {
           if (violatesSafety(`${m.name}`)) continue;
           const match = input.recipes.find((r) => r.name.toLowerCase() === m.name.toLowerCase().replace(/^leftover /, ""));
@@ -330,7 +330,7 @@ export async function generateWeek(ctx: AiContext, input: GenerateWeekInput & { 
         }
       }
       const dinners = meals.filter((m) => m.mealType === "dinner").length;
-      if (meals.length < 7 || dinners < Math.min(3, input.mealsNeeded.dinner)) throw new Error("AI week too thin");
+      if (meals.length < Math.min(7, (input.days ?? 7)) || dinners < Math.min(3, input.mealsNeeded.dinner)) throw new Error("AI week too thin");
       const pantry = new Map(input.pantry.map((p) => [canonicalName(p.name), p.servings ?? 2]));
       const list = shoppingListFromMeals(meals, pantry, input);
       // Fill prices the catalog doesn't know from the AI's estimate.
@@ -392,5 +392,68 @@ export async function suggestFromPantry(ctx: AiContext, input: SuggestInput & { 
     return { suggestions, source: "ai" };
   } catch (e) {
     return { ...fallback(), error: (e as Error).message };
+  }
+}
+
+// ----------------------------------------------------------- adventures ----
+/**
+ * Frame verified events as quests. The model gets only ids + facts and returns
+ * titles/descriptions per id; anything referencing an unknown id, or tripping
+ * the safety filter, is dropped. Facts never come from the model.
+ */
+export async function frameAdventures(ctx: AiContext, events: { id: number; name: string; category: string; venue: string | null; startAt: string; price: string; distanceMi: number | null; description: string }[], hints: { interests: string[]; window: string }): Promise<Map<number, { title: string; description: string; why: string }>> {
+  const out = new Map<number, { title: string; description: string; why: string }>();
+  const provider = getProvider();
+  if (!provider || events.length === 0) return out;
+  const key = `adv:${hash({ ids: events.map((e) => e.id).sort(), w: hints.window })}`;
+  const cached = readCache<{ picks: { eventId: number; title: string; description: string; why: string }[] }>("adventure", key);
+  const picks = cached?.picks ?? (await (async () => {
+    try {
+      const res = await provider.generateJSON(
+        {
+          system: SYSTEM_BASE + " You are the game master framing REAL local events as optional 'adventure quests' in a life RPG. You must not change or invent any fact (names, dates, times, prices, venues). Titles are short and evocative (e.g. 'Market run', 'Night at the conservatory'), descriptions give one concrete, fun objective at the event, 'why' says in one sentence why it may fit this person. Keep it warm, never cheesy.",
+          user: [
+            `Window: ${hints.window}. Interests: ${hints.interests.join(", ") || "unknown"}. Rank context: ${JSON.stringify(ctx.rank.overall)}.`,
+            `Events (use eventId exactly): ${JSON.stringify(events)}`,
+            "Return JSON {picks:[{eventId, title, description, why}]} for the 2-4 best fits.",
+          ].join("\n"),
+          maxTokens: 600,
+          temperature: 0.8,
+        },
+        EventQuestFramingSchema,
+      );
+      writeCache("adventure", key, ctx.profile.today, res, provider);
+      return res.picks;
+    } catch {
+      return [];
+    }
+  })());
+  const known = new Set(events.map((e) => e.id));
+  for (const p of picks) {
+    if (!known.has(p.eventId)) continue;
+    if (violatesSafety(`${p.title} ${p.description}`)) continue;
+    out.set(p.eventId, { title: p.title, description: p.description, why: p.why });
+  }
+  return out;
+}
+
+/** "AI enhance" a user-written quest. Returns null without a provider or on any failure. */
+export async function enhanceUserQuest(ctx: AiContext, title: string): Promise<AiUserQuestEnhance | null> {
+  const provider = getProvider();
+  if (!provider) return null;
+  try {
+    const out = await provider.generateJSON(
+      {
+        system: SYSTEM_BASE + " Rewrite a user's own to-do as a small, optional quest in a life RPG. Keep the real task intact and specific; add light RPG flavour only when it fits ('Supply run' for grocery shopping is good, forced fantasy for brushing teeth is not). XP 15-60 by effort.",
+        user: `User quest: "${title}". Today: ${ctx.profile.today}. Return JSON {title, description, domain, xpReward, estimatedMinutes}.`,
+        maxTokens: 200,
+        temperature: 0.7,
+      },
+      UserQuestEnhanceSchema,
+    );
+    if (violatesSafety(`${out.title} ${out.description}`)) return null;
+    return out;
+  } catch {
+    return null;
   }
 }

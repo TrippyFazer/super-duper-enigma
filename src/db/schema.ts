@@ -431,8 +431,64 @@ export const questOffers = sqliteTable(
     declinedAt: text("declined_at"),
     expiresAt: text("expires_at"),
     params: text("params").notNull().default("{}"),
+    // ---- Real-world (adventure) quests: facts come from a verified event, never from the model.
+    eventId: integer("event_id"),
+    category: text("category"),
+    venue: text("venue"),
+    startAt: text("start_at"),
+    endAt: text("end_at"),
+    priceLabel: text("price_label"),
+    distanceMi: real("distance_mi"),
+    sourceName: text("source_name"),
+    sourceUrl: text("source_url"),
+    why: text("why"),
+    /** loved | good | meh | not-for-me | skipped (set after completion / "did you go?") */
+    feedback: text("feedback"),
+    /** JSON follow-up hook, e.g. {"kind":"pantry","prompt":"Which ingredient did you pick up?"} */
+    followUp: text("follow_up"),
   },
   (t) => [index("quest_offers_date_idx").on(t.date), index("quest_offers_status_idx").on(t.status)],
+);
+
+/** Cached public events from real sources (Ticketmaster, public ICS calendars). Facts only; never AI-written. */
+export const localEvents = sqliteTable(
+  "local_events",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    provider: text("provider").notNull(),
+    externalId: text("external_id").notNull(),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    /** music | sports | food | comedy | film | arts | outdoor | market | festival | community | class | nightlife | family | other */
+    category: text("category").notNull().default("other"),
+    startAt: text("start_at").notNull(),
+    endAt: text("end_at"),
+    venue: text("venue"),
+    address: text("address"),
+    city: text("city"),
+    lat: real("lat"),
+    lng: real("lng"),
+    priceMin: real("price_min"),
+    priceMax: real("price_max"),
+    isFree: integer("is_free", { mode: "boolean" }),
+    url: text("url"),
+    sourceName: text("source_name").notNull(),
+    fetchedAt: text("fetched_at").notNull().default(now),
+  },
+  (t) => [uniqueIndex("local_events_ext_uq").on(t.provider, t.externalId), index("local_events_start_idx").on(t.startAt)],
+);
+
+/** Small per-day flags the user sets explicitly, e.g. "done eating for today". */
+export const dayFlags = sqliteTable(
+  "day_flags",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    date: text("date").notNull(),
+    key: text("key").notNull(),
+    value: text("value").notNull().default("1"),
+    updatedAt: text("updated_at").notNull().default(now),
+  },
+  (t) => [uniqueIndex("day_flags_date_key_uq").on(t.date, t.key)],
 );
 
 // ---------------------------------------------------------------------------
@@ -757,8 +813,12 @@ export const groceryWeeks = sqliteTable(
   "grocery_weeks",
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
-    /** Monday of the week the food is for (shopping usually happens the Sunday before) */
+    /** First day the plan covers. Usually a Monday, but a supply run started on a Wednesday starts on that Wednesday. */
     weekStart: text("week_start").notNull(),
+    /** How many days the plan covers (3–14). */
+    spanDays: integer("days").notNull().default(7),
+    /** week (regular weekly reset) | supply (ad-hoc "I'm shopping today" run) */
+    kind: text("kind").notNull().default("week"),
     budget: real("budget").notNull().default(80),
     /** budget | balanced | flexible */
     budgetMode: text("budget_mode").notNull().default("balanced"),
@@ -855,4 +915,6 @@ export type MotivationReason = typeof motivationReasons.$inferSelect;
 export type GroceryWeek = typeof groceryWeeks.$inferSelect;
 export type GroceryItem = typeof groceryItems.$inferSelect;
 export type PantryItem = typeof pantryItems.$inferSelect;
+export type LocalEvent = typeof localEvents.$inferSelect;
+export type DayFlag = typeof dayFlags.$inferSelect;
 export type MealPrepSession = typeof mealPrepSessions.$inferSelect;

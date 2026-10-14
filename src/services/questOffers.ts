@@ -14,7 +14,7 @@ import { awardXp, voidXpForSource, type XpAward } from "./xp";
  * Rules (docs/ranking-methodology.md → Optional quests):
  *  - 0–2 offers per day, often none. Frequency: low ≈ 0.6/day, normal ≈ 1.1/day, high ≈ 1.8/day.
  *  - Never more than one open (offered or accepted) quest at a time.
- *  - A template is not re-offered within 7 days.
+ *  - A template is not re-offered within 14 days (variety matters).
  *  - Declining does nothing except mark the offer declined. No XP, rank, streak or score effect — ever.
  *  - Offers expire quietly.
  */
@@ -118,7 +118,7 @@ export async function maybeOffer(input: OfferEngineInput): Promise<QuestOffer | 
   const p = Math.min(0.85, cfg.perDay / 3 + (todays.length === 0 && slot === "eve" ? 0.15 : 0));
   if (roll(`${input.today}:${slot}:offer`) > p) return null;
 
-  const recent = db.select().from(questOffers).where(gte(questOffers.date, addDays(input.today, -7))).all();
+  const recent = db.select().from(questOffers).where(gte(questOffers.date, addDays(input.today, -14))).all();
   const recentKeys = new Set(recent.map((r) => r.templateKey).filter(Boolean));
   const recentTitles = recent.map((r) => r.title);
 
@@ -292,4 +292,35 @@ export function signalsFromContext(ctx: ProgressionContext, extra: { localHour: 
     planCompletedToday: extra.planCompletedToday,
     readinessLow: extra.readinessLow,
   };
+}
+
+/**
+ * Adaptive grocery quest: created (already accepted) when the user starts an
+ * ad-hoc supply run. Completes when the trip is finished — any day of the week.
+ */
+export function offerSupplyRun(input: { today: ISODate; now: Date; weekId: number; days: number; budget: number }): QuestOffer | null {
+  const db = getDb();
+  const existing = db.select().from(questOffers).where(and(eq(questOffers.templateKey, "supply-run"), inArray(questOffers.status, ["accepted", "offered"]))).all().find((o) => parseJson<{ weekId?: number }>(o.params, {}).weekId === input.weekId);
+  if (existing) return existing;
+  return db
+    .insert(questOffers)
+    .values({
+      templateKey: "supply-run",
+      source: "library",
+      title: "Supply run",
+      description: `Restock food for the next ${input.days} days${input.budget > 0 ? ` while staying around $${Math.round(input.budget)}` : ""}.`,
+      domain: "cooking",
+      difficulty: "uncommon",
+      kind: "side",
+      estimatedMinutes: 60,
+      xpReward: 50,
+      status: "accepted",
+      date: input.today,
+      offeredAt: input.now.toISOString(),
+      acceptedAt: input.now.toISOString(),
+      expiresAt: new Date(input.now.getTime() + 36 * 3600_000).toISOString(),
+      params: toJson({ weekId: input.weekId, days: input.days, budget: input.budget }),
+    })
+    .returning()
+    .get();
 }

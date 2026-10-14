@@ -171,3 +171,29 @@ export const DayAdjustSchema = z.object({
     .max(4),
   rationale: z.string().max(240).default(""),
 });
+
+/** AI frames verified events; it may only reference ids we gave it. Facts are rebuilt from the cache. */
+export const EventQuestFramingSchema = z.object({
+  picks: z
+    .array(
+      z.object({
+        eventId: z.number().int(),
+        title: z.string().min(4).max(60),
+        description: z.string().min(10).max(180),
+        why: z.string().max(140).default(""),
+      }),
+    )
+    .min(1)
+    .max(4),
+});
+export type AiEventQuestFraming = z.infer<typeof EventQuestFramingSchema>;
+
+/** Optional "AI enhance" for a user-written quest. Ordinary things stay ordinary. */
+export const UserQuestEnhanceSchema = z.object({
+  title: z.string().min(3).max(60),
+  description: z.string().max(160).default(""),
+  domain: z.enum(["fitness", "sleep", "cooking", "wealth", "skincare", "sobriety", "habits"]),
+  xpReward: z.number().int().min(15).max(60),
+  estimatedMinutes: z.number().int().min(0).max(240),
+});
+export type AiUserQuestEnhance = z.infer<typeof UserQuestEnhanceSchema>;

@@ -91,6 +91,10 @@ Stack: Next.js 15 (App Router, server actions), React 19, TypeScript, Tailwind 4
 
 One floating **+ LOG** button on every tab opens Food · Workout · Sleep · Routine/Habit · More (ordered by what you log most). Food logging is one sheet everywhere: Recent, Search, Restaurant, Quick macros, Estimate, Recipe, with "I cooked this" on the confirm step. The UX audit behind the 0.4.0 layout is in `docs/ux-audit.md`.
 
+## Adventure quests (optional)
+
+Special quests can be real things to go do: a farmers market, live music, a festival, a class. Set a home area and radius in Settings → Adventure (no GPS), then use **Find a quest** in the Quest journal or let discovery run occasionally. Events come only from configured sources — `TICKETMASTER_API_KEY` (Ticketmaster Discovery) and/or `EVENT_ICS_URLS` (public iCalendar feeds). The AI, when configured, only frames verified events; it never invents names, dates, prices or venues. Without any source, curated quests still work. See `docs/behavior.md`.
+
 ## How ranking works (short version)
 
 * Each domain computes a 0–100 score from rolling 30/90-day windows of your logs, through anchor tables placed at research thresholds (e.g. 150 moderate minutes/week ≈ median → 50).
@@ -121,6 +125,6 @@ Everything lives in `data/ascend.db` on the machine running the app. Financial f
 ## Testing
 
 ```bash
-npm test          # 128 tests: engine, XP ledger, quests, achievements, quest offers (no-penalty decline, expiry, XP bands, guardrails), AI contracts + fallback + cache, workout sessions/PRs, nutrition + meal plans, UX rules (health sources, + LOG ordering, meal-type inference, weight steppers)
+npm test          # 170 tests: engine, XP ledger, quests, achievements, quest offers (no-penalty decline, expiry, XP bands, guardrails), AI contracts + fallback + cache, workout sessions/PRs, nutrition + meal plans, UX rules, flexible planning, today semantics, adventure quests (filters, parsers, fallbacks)
 npm run typecheck
 ```

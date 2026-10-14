@@ -5,6 +5,9 @@ export type BudgetMode = "budget" | "balanced" | "flexible";
 
 export interface WeekVM {
   id: number;
+  /** number of days the plan covers */
+  spanDays: number;
+  kind: string;
   status: string;
   source: string;
   budget: number;
@@ -47,6 +50,8 @@ export interface WeekPlannerProps {
   aiEnabled: boolean;
   /** Deep link (?step=shop) */
   initialStep?: string | null;
+  /** Days to plan when no plan exists yet (?days=5) */
+  plannedDays?: number;
 }
 
 export const STEP_KEYS = ["review", "leftovers", "budget", "meals", "shop", "prep", "training", "quests", "ready"] as const;

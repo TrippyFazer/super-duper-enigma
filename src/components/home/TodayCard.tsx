@@ -3,14 +3,13 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Dumbbell, UtensilsCrossed, Footprints, Moon, Scroll, ListChecks, ChevronRight, ChevronDown, Check } from "lucide-react";
+import { Dumbbell, UtensilsCrossed, Footprints, Moon, Scroll, ListChecks, ChevronRight, ChevronDown, Check, Minus } from "lucide-react";
 import { offerStepQuestAction } from "@/actions/planner";
 import { useFeedback } from "@/components/feedback/FeedbackProvider";
 import { cx } from "@/components/ui/primitives";
 import { ChecklistRows } from "./TodayChecklist";
 import type { TodaySummary } from "@/services/today";
-
-const fmtH = (min: number) => `${Math.floor(min / 60)}h ${String(min % 60).padStart(2, "0")}m`;
+import type { RowTone } from "@/services/todayState";
 
 /**
  * ONE consolidated TODAY card. Each row is a summary; tapping goes to the
@@ -25,27 +24,8 @@ export function TodayCard({ s }: { s: TodaySummary }) {
   const checklistDone = s.checklist.filter((i) => i.done).length;
 
   const w = s.workout;
-  const workoutLine = !w
-    ? null
-    : w.activeSessionId
-      ? { text: "Session in progress", sub: "Tap to resume", href: "/planner/workout/session", done: false }
-      : w.loggedToday.length > 0
-        ? { text: `${w.loggedToday.map((x) => `${x.type} ${x.durationMin} min`).join(" · ")}`, sub: "Done ✓", href: "/planner/workout", done: true }
-        : w.status === "completed"
-          ? { text: w.name, sub: "Done ✓", href: "/planner/workout", done: true }
-          : w.name
-            ? { text: w.name, sub: `${w.exercises} exercises · ~${w.minutes} min · tap to start`, href: "/planner/workout", done: false }
-            : { text: "No workout planned", sub: "Build one or log what you did", href: "/planner/workout", done: false };
-
+  const workoutHref = w?.activeSessionId ? "/planner/workout/session" : "/planner/workout";
   const n = s.nutrition;
-  const nutritionLine = !n
-    ? null
-    : n.calories === 0
-      ? { text: "Nothing logged yet", sub: `${n.calorieTarget} kcal · ${n.proteinTarget} g protein target`, done: false }
-      : n.proteinHit
-        ? { text: `${n.calories} kcal · ${n.protein} g protein`, sub: "Protein target hit ✓", done: true }
-        : { text: `${n.calories} kcal · ${n.protein} g protein`, sub: `${Math.max(0, n.proteinTarget - n.protein)} g protein to go`, done: false };
-
   const st = s.steps;
   const sl = s.sleep;
 
@@ -58,18 +38,18 @@ export function TodayCard({ s }: { s: TodaySummary }) {
         </span>
       </div>
       <ul className="divide-y divide-border/60 border-t border-border/60">
-        {workoutLine && <Row icon={Dumbbell} label="Workout" text={workoutLine.text} sub={workoutLine.sub} href={workoutLine.href} done={workoutLine.done} />}
-        {nutritionLine && <Row icon={UtensilsCrossed} label="Nutrition" text={nutritionLine.text} sub={nutritionLine.sub} href="/planner/meals" done={nutritionLine.done} />}
+        {w && <Row icon={Dumbbell} label="Workout" text={w.state.text} sub={w.state.sub} href={workoutHref} tone={w.state.tone} />}
+        {n && <Row icon={UtensilsCrossed} label="Food" text={n.state.text} sub={n.state.sub} href="/planner/meals" tone={n.state.tone} />}
         {st && (
           <Row
             icon={Footprints}
             label="Steps"
-            text={st.value != null ? `${st.value.toLocaleString()} / ${st.target.toLocaleString()}` : "—"}
-            sub={st.value == null ? (st.automatic ? "Waiting for today's samples" : "Not tracked · log in + LOG › More") : st.value >= st.target ? "Target hit ✓" : `${(st.target - st.value).toLocaleString()} to go`}
+            text={st.state.text}
+            sub={st.state.sub}
             href="/domains/fitness"
-            done={st.value != null && st.value >= st.target}
+            tone={st.state.tone}
             right={
-              s.walkOffer && !s.hasWalkQuest && !offered ? (
+              s.walkOffer && !s.hasWalkQuest && !offered && st.state.freshness.state === "available" ? (
                 <button
                   disabled={pending}
                   onClick={(e) => {
@@ -89,12 +69,12 @@ export function TodayCard({ s }: { s: TodaySummary }) {
             }
           />
         )}
-        {sl && <Row icon={Moon} label="Sleep" text={sl.lastNightMin != null ? fmtH(sl.lastNightMin) : "—"} sub={sl.lastNightMin == null ? (sl.automatic ? "No night data yet" : "Log last night in + LOG") : sl.lastNightMin >= sl.targetMin ? "At target ✓" : `${fmtH(sl.targetMin - sl.lastNightMin)} short of target`} href="/domains/sleep" done={sl.lastNightMin != null && sl.lastNightMin >= sl.targetMin} />}
-        <Row icon={Scroll} label="Quests" text={s.quests.dailyTotal ? `${s.quests.dailyDone}/${s.quests.dailyTotal} daily` : "None yet"} sub={s.quests.weeklyInProgress ? `${s.quests.weeklyInProgress} weekly in progress` : s.quests.dailyTotal && s.quests.dailyDone === s.quests.dailyTotal ? "Today's adventure complete ✓" : "Open the journal"} href="/quests" done={s.quests.dailyTotal > 0 && s.quests.dailyDone === s.quests.dailyTotal} />
+        {sl && <Row icon={Moon} label="Sleep" text={sl.state.text} sub={sl.state.sub} href="/domains/sleep" tone={sl.state.tone} />}
+        <Row icon={Scroll} label="Quests" text={s.quests.dailyTotal ? `${s.quests.dailyDone}/${s.quests.dailyTotal} daily` : "None yet"} sub={s.quests.weeklyInProgress ? `${s.quests.weeklyInProgress} weekly in progress` : s.quests.dailyTotal && s.quests.dailyDone === s.quests.dailyTotal ? "Today's adventure complete ✓" : "Open the journal"} href="/quests" tone={s.quests.dailyTotal > 0 && s.quests.dailyDone === s.quests.dailyTotal ? "success" : "neutral"} />
         {s.checklist.length > 0 && (
           <li>
             <button onClick={() => setHabitsOpen((v) => !v)} aria-expanded={habitsOpen} className="press flex min-h-12 w-full items-center gap-3 px-4 py-2 text-left">
-              <Icon icon={ListChecks} done={checklistDone === s.checklist.length} />
+              <Icon icon={ListChecks} tone={checklistDone === s.checklist.length ? "success" : "neutral"} />
               <span className="min-w-0 flex-1">
                 <span className="block text-[14px]">Routines & habits</span>
                 <span className="block truncate text-[12px] text-muted">{checklistDone === s.checklist.length ? "All done ✓" : `${checklistDone}/${s.checklist.length} · tap to tick off`}</span>
@@ -113,25 +93,31 @@ export function TodayCard({ s }: { s: TodaySummary }) {
   );
 }
 
-function Icon({ icon: I, done }: { icon: typeof Dumbbell; done?: boolean }) {
-  return (
-    <span className={cx("flex h-9 w-9 shrink-0 items-center justify-center rounded-full border", done ? "border-success/50 bg-success/10 text-success" : "border-border bg-black/25 text-text-2")}>
-      {done ? <Check size={16} strokeWidth={3} /> : <I size={16} />}
-    </span>
-  );
+const TONE_RING: Record<RowTone, string> = {
+  success: "border-success/50 bg-success/10 text-success",
+  resolved: "border-border bg-black/25 text-muted",
+  pending: "border-border bg-black/25 text-muted animate-pulse-soft",
+  attention: "border-gold/50 bg-gold/10 text-gold",
+  neutral: "border-border bg-black/25 text-text-2",
+};
+const TONE_SUB: Record<RowTone, string> = { success: "text-success/90", resolved: "text-muted", pending: "text-muted", attention: "text-gold", neutral: "text-muted" };
+
+function Icon({ icon: I, tone }: { icon: typeof Dumbbell; tone: RowTone }) {
+  return <span className={cx("flex h-9 w-9 shrink-0 items-center justify-center rounded-full border", TONE_RING[tone])}>{tone === "success" ? <Check size={16} strokeWidth={3} /> : tone === "resolved" ? <Minus size={16} strokeWidth={3} /> : <I size={16} />}</span>;
 }
 
-function Row({ icon, label, text, sub, href, done, right }: { icon: typeof Dumbbell; label: string; text: string; sub?: string; href: string; done?: boolean; right?: React.ReactNode }) {
+/** A row is a summary; tapping goes to the owner screen. Tone encodes success / resolved / pending / attention. */
+function Row({ icon, label, text, sub, href, tone, right }: { icon: typeof Dumbbell; label: string; text: string; sub?: string; href: string; tone: RowTone; right?: React.ReactNode }) {
   return (
     <li>
-      <Link href={href} className="press flex min-h-12 items-center gap-3 px-4 py-2">
-        <Icon icon={icon} done={done} />
+      <Link href={href} className="press flex min-h-12 items-center gap-3 px-4 py-2" data-tone={tone}>
+        <Icon icon={icon} tone={tone} />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-[14px]">
             <span className="text-muted">{label} · </span>
             {text}
           </span>
-          {sub && <span className={cx("block truncate text-[12px]", done ? "text-success/90" : "text-muted")}>{sub}</span>}
+          {sub && <span className={cx("block truncate text-[12px]", TONE_SUB[tone])}>{sub}</span>}
         </span>
         {right ?? <ChevronRight size={16} className="shrink-0 text-faint" />}
       </Link>

@@ -97,7 +97,17 @@ export async function refreshOffers(profile: ProfileView = getProfile()) {
   signals.dailyQuestsTotal = quests.daily.length;
 
   const aiCandidate = isAiEnabled() ? () => aiQuestCandidate(buildAiContext(profile, profile.preferences, assessment), { localHour, signals: signals as unknown as Record<string, unknown> }) : undefined;
-  const created = await maybeOffer({ today, now, localHour, signals, frequency: profile.preferences.questFrequency, aiCandidate });
+  let created = await maybeOffer({ today, now, localHour, signals, frequency: profile.preferences.questFrequency, aiCandidate });
+  // Occasionally a real-world adventure instead (cached searches; never on every load).
+  if (!created) {
+    try {
+      const { maybeDiscoverAdventure } = await import("./adventure");
+      const adv = await maybeDiscoverAdventure(profile, now);
+      if (adv) created = null; // notification already sent by discovery
+    } catch {
+      /* event discovery is optional */
+    }
+  }
   if (created) pushNotification(profile.preferences.notifications, { kind: "quest", title: "⚔ A special quest has appeared", body: `${created.title} · +${created.xpReward} XP`, href: "/quests", key: `n:offer:${created.id}` });
   // Expiring soon (accepted, < 2h left)
   const open = openOffer();

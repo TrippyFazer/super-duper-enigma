@@ -9,10 +9,11 @@ import { Chip, StepTitle } from "./parts";
 import type { BudgetMode, WeekDefaults, WeekVM } from "./types";
 
 /** Step 3: budget, targets, meals needed → generate. */
-export function BudgetStep({ weekStart, weekLabel, week: w, defaults, aiEnabled, onGenerated }: { weekStart: string; weekLabel: string; week: WeekVM | null; defaults: WeekDefaults; aiEnabled: boolean; onGenerated: () => void }) {
+export function BudgetStep({ weekStart, weekLabel, week: w, defaults, aiEnabled, today, plannedDays, onGenerated }: { weekStart: string; weekLabel: string; week: WeekVM | null; defaults: WeekDefaults; aiEnabled: boolean; today: string; plannedDays: number; onGenerated: () => void }) {
   const router = useRouter();
   const { toast } = useFeedback();
   const [pending, start] = useTransition();
+  const [days, setDays] = useState<number>(w?.spanDays ?? plannedDays);
   const [f, setF] = useState({
     budget: String(w?.budget ?? defaults.budget),
     budgetMode: (w?.budgetMode ?? defaults.budgetMode) as BudgetMode,
@@ -32,7 +33,7 @@ export function BudgetStep({ weekStart, weekLabel, week: w, defaults, aiEnabled,
   const [more, setMore] = useState(false);
   const save = (thenGenerate: boolean) =>
     start(async () => {
-      const r = await upsertWeekAction({ weekStart, budget: Number(f.budget) || 0, budgetMode: f.budgetMode, calorieTarget: Number(f.calorieTarget), proteinTarget: Number(f.proteinTarget), mealsNeeded: { breakfast: Number(f.breakfast), lunch: Number(f.lunch), dinner: Number(f.dinner), snacks: Number(f.snacks), eatingOut: Number(f.eatingOut) }, prefs: { quickWeekdays: f.quickWeekdays, mealPrep: f.mealPrep, highProtein: f.highProtein, reuseIngredients: f.reuseIngredients, notes: f.notes || undefined } });
+      const r = await upsertWeekAction({ weekStart, days, budget: Number(f.budget) || 0, budgetMode: f.budgetMode, calorieTarget: Number(f.calorieTarget), proteinTarget: Number(f.proteinTarget), mealsNeeded: { breakfast: Number(f.breakfast), lunch: Number(f.lunch), dinner: Number(f.dinner), snacks: Number(f.snacks), eatingOut: Number(f.eatingOut) }, prefs: { quickWeekdays: f.quickWeekdays, mealPrep: f.mealPrep, highProtein: f.highProtein, reuseIngredients: f.reuseIngredients, notes: f.notes || undefined } });
       if (thenGenerate) {
         const g = await generateWeekAction(r.id, !!w && w.status !== "planning");
         if (!g.ok) toast(g.error ?? "Could not generate", "error");
@@ -44,8 +45,19 @@ export function BudgetStep({ weekStart, weekLabel, week: w, defaults, aiEnabled,
 
   return (
     <section className="space-y-3">
-      <StepTitle eyebrow="Step 3" title="Budget & meals" body={`Planning ${weekLabel}. Eating out is a plan too.`} />
+      <StepTitle eyebrow="Step 3" title="Budget & meals" body={`${weekStart === today ? "Starting today" : `Starting ${weekLabel.split(" – ")[0]}`}. Eating out is a plan too.`} />
       <div className="plate space-y-4 px-4 py-4">
+        <div>
+          <div className="mb-1.5 text-xs font-medium text-text-2">How many days to plan</div>
+          <div className="flex gap-2" role="group" aria-label="Days to plan">
+            {[3, 5, 7].map((d) => (
+              <button key={d} onClick={() => setDays(d)} aria-pressed={days === d} className={cx("press h-11 flex-1 rounded-lg border text-sm", days === d ? "border-gold/60 bg-gold/12 text-gold" : "border-border bg-card-2 text-text-2")}>
+                {d} days
+              </button>
+            ))}
+            <input type="number" inputMode="numeric" min={2} max={14} value={[3, 5, 7].includes(days) ? "" : days} onChange={(e) => setDays(Math.max(2, Math.min(14, Number(e.target.value) || 7)))} placeholder="Custom" className={cx(inputClass, "tabular w-20 text-center")} aria-label="Custom days" />
+          </div>
+        </div>
         <Field label="Weekly grocery budget $">
           <input type="number" inputMode="numeric" value={f.budget} onChange={(e) => setF({ ...f, budget: e.target.value })} className={inputClass} />
         </Field>

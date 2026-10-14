@@ -7,11 +7,12 @@ import { refreshOffers } from "@/services/planner";
 import { unreadCount, listNotifications } from "@/services/notifications";
 import { runScheduledNotifications } from "@/services/scheduler";
 import { computeSleepSchedule, to12h } from "@/services/sleepPlan";
-import { getWeek, planningWeekStart } from "@/services/foodWeek";
+import { relevantWeek, weekEnd } from "@/services/foodWeek";
 import { todaySummary } from "@/services/today";
-import { startOfWeek, dateInTz, weekday } from "@/lib/dates";
+import { startOfWeek, dateInTz, weekday, addDays } from "@/lib/dates";
 import { CharacterHero } from "@/components/hero/CharacterHero";
 import { SpecialQuestCard } from "@/components/quests/SpecialQuestCard";
+import { offerView } from "@/components/quests/offerView";
 import { TodayCard } from "@/components/home/TodayCard";
 import { ProgressionStrip } from "@/components/home/ProgressionStrip";
 import { NextRankCard } from "@/components/home/NextRankCard";
@@ -37,22 +38,31 @@ export default async function HomePage() {
   const summary = todaySummary(profile, { localHour });
 
   // ---- ONE context card, by priority: special quest > Sunday reset > morning motivation > wind-down > weekly review.
-  const isSunday = weekday(today) === 0;
-  const shoppingDay = weekday(today) === profile.preferences.food.shoppingDay;
-  const planningWeek = getWeek(planningWeekStart(today, profile.preferences.food.shoppingDay));
-  const showSunday = profile.activeDomains.includes("cooking") && (isSunday || shoppingDay) && (!planningWeek || planningWeek.status === "planning");
+  // The weekly reset is suggested on the preferred day only; it can be started any day from Planner.
+  const DAY_NAME = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  const preferredDay = profile.preferences.food.shoppingDay;
+  const shoppingDay = weekday(today) === preferredDay;
+  const planningWeek = relevantWeek(today);
+  const covered = !!planningWeek && planningWeek.status !== "planning" && weekEnd(planningWeek) >= addDays(today, 2);
+  const showSunday = profile.activeDomains.includes("cooking") && shoppingDay && !covered;
   const morningNote = localHour < 11 ? (listNotifications(20).find((n) => n.key === `n:morning:${today}`) ?? null) : null;
   const sched = profile.activeDomains.includes("sleep") && localHour >= 19 ? computeSleepSchedule(profile.targets, profile.preferences.sleep) : null;
+  const earlier = summary.sleep?.state.windDownEarlierMin ?? 0;
+  const shiftClock = (hhmm: string, minutes: number) => {
+    const [h, m] = hhmm.split(":").map(Number);
+    const t = (h * 60 + m - minutes + 1440) % 1440;
+    return `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`;
+  };
   const showReview = weekday(today) >= 1 && weekday(today) <= 2 && startOfWeek(today) !== dateInTz(new Date(profile.onboardingCompletedAt ?? ""), profile.timezone);
 
   const context = offer ? (
-    <SpecialQuestCard offer={{ id: offer.id, title: offer.title, description: offer.description, domain: offer.domain, difficulty: offer.difficulty, kind: offer.kind, estimatedMinutes: offer.estimatedMinutes, xpReward: offer.xpReward, status: offer.status, expiresAt: offer.expiresAt }} />
+    <SpecialQuestCard offer={offerView(offer)} />
   ) : showSunday ? (
-    <Link href="/planner/week" className="plate press flex min-h-14 items-center gap-3 border-gold/40 px-4 py-3">
+    <Link href="/planner/week?start=today" className="plate press flex min-h-14 items-center gap-3 border-gold/40 px-4 py-3">
       <CalendarRange size={18} className="shrink-0 text-gold" />
       <div className="min-w-0 flex-1">
-        <div className="text-sm font-medium">Sunday reset</div>
-        <div className="serif text-[13px] text-muted">Plan the week&apos;s meals, budget and list.</div>
+        <div className="text-sm font-medium">{DAY_NAME[preferredDay]} reset</div>
+        <div className="serif text-[13px] text-muted">Plan the next days&apos; meals, budget and list.</div>
       </div>
       <ChevronRight size={16} className="text-faint" />
     </Link>
@@ -65,8 +75,8 @@ export default async function HomePage() {
     <Link href="/domains/sleep" className="plate press flex min-h-14 items-center gap-3 px-4 py-3">
       <Moon size={18} className="shrink-0 text-gold" />
       <div className="min-w-0 flex-1">
-        <div className="text-sm font-medium">Wind down {to12h(sched.windDown)} · bed {to12h(sched.inBed)}</div>
-        <div className="serif text-[13px] text-muted">Wake {to12h(sched.wake)} for {Math.round((sched.targetMin / 60) * 10) / 10} h.</div>
+        <div className="text-sm font-medium">{earlier ? `Start wind-down ${earlier} min earlier? · ${to12h(shiftClock(sched.windDown, earlier))}` : `Wind down ${to12h(sched.windDown)} · bed ${to12h(sched.inBed)}`}</div>
+        <div className="serif text-[13px] text-muted">{earlier ? `Last night was ${Math.round((summary.sleep!.state.deficitMin / 60) * 10) / 10} h short. Tonight is the lever.` : `Wake ${to12h(sched.wake)} for ${Math.round((sched.targetMin / 60) * 10) / 10} h.`}</div>
       </div>
       <ChevronRight size={16} className="text-faint" />
     </Link>

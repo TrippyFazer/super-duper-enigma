@@ -84,6 +84,8 @@ export interface GenerateWeekInput {
   pantry: PantryOnHand[];
   seed?: number;
   recentRecipeIds?: number[];
+  /** Number of days the plan covers (default 7). A supply run may cover 3–5 days from today. */
+  days?: number;
 }
 
 function rng(seed: number) {
@@ -212,7 +214,8 @@ export function generateTemplateWeek(input: GenerateWeekInput): GeneratedWeek {
   }
 
   // --- Schedule across the week (Mon..Sun), eating-out days get no dinner planned.
-  const days = Array.from({ length: 7 }, (_, i) => addDays(input.weekStart, i));
+  const nDays = Math.max(1, Math.min(14, input.days ?? 7));
+  const days = Array.from({ length: nDays }, (_, i) => addDays(input.weekStart, i));
   const meals: WeekMeal[] = [];
   const toMeal = (r: RecipeLite, date: ISODate, mealType: WeekMeal["mealType"], leftover = false): WeekMeal => ({ date, mealType, name: leftover ? `Leftover ${r.name}` : r.name, calories: r.calories!, protein: r.proteinG!, carbs: r.carbsG ?? 0, fat: r.fatG ?? 0, ingredients: r.ingredients, recipeId: r.id, prepMinutes: leftover ? 3 : r.prepTimeMin + r.cookTimeMin, leftover });
   const expand = (slot: "breakfast" | "lunch" | "dinner") => chosen.filter((c) => c.slot === slot).flatMap((c) => Array(c.times).fill(c.recipe) as RecipeLite[]);
@@ -221,8 +224,10 @@ export function generateTemplateWeek(input: GenerateWeekInput): GeneratedWeek {
   const lunchSeq = expand("lunch");
   // eating out: skip the last N dinner days (weekend first), typical for Fri/Sat.
   const eatOutDays = new Set<ISODate>();
-  const eatOut = Math.min(7, input.mealsNeeded.eatingOut);
-  for (let i = 0; i < eatOut; i++) eatOutDays.add(days[(5 + i) % 7]);
+  // Eating-out days are placed on Fri/Sat first (when the plan covers them), then the last days of the plan.
+  const eatOut = Math.min(nDays, input.mealsNeeded.eatingOut);
+  const weekendFirst = [...days].sort((a, b) => Number(/5|6/.test(String(new Date(b + "T00:00:00Z").getUTCDay()))) - Number(/5|6/.test(String(new Date(a + "T00:00:00Z").getUTCDay()))) || (b > a ? 1 : -1));
+  for (let i = 0; i < eatOut; i++) eatOutDays.add(weekendFirst[i]);
   let d = 0;
   for (const day of days) {
     if (breakfastSeq.length) meals.push(toMeal(breakfastSeq[d % breakfastSeq.length], day, "breakfast"));
