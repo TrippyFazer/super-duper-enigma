@@ -48,6 +48,16 @@ export default function PlannerPage() {
   const trained = new Set(loadWorkoutsBetween(ws, addDays(ws, 6)).map((w) => w.date));
   const trainingDays = profile.preferences.fitness.trainingDays;
   const weekDates = Array.from({ length: 7 }, (_, i) => addDays(ws, i));
+  const plannedDays = weekDates.filter((d) => trainingDays.includes(weekday(d))).length;
+  const doneDays = weekDates.filter((d) => trained.has(d)).length;
+  // PLANNER = FUTURE: the week's shape, not today's numbers (those are on Home).
+  const workoutSub = plan.activeSession
+    ? "Session in progress · tap to resume"
+    : plannedDays
+      ? `${plannedDays} planned · ${doneDays} done this week`
+      : doneDays
+        ? `${doneDays} done this week`
+        : "Nothing planned this week";
   const mealsThisWeek = thisWeek ? thisWeek.days.reduce((a, d) => a + d.meals.filter((m) => m.status === "planned" || m.status === "prepared").length, 0) : 0;
 
   const weekStatus = planningWeek && planningWeek.status !== "planning" ? planningWeek.status : null;
@@ -79,7 +89,7 @@ export default function PlannerPage() {
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="display block text-[15px] font-semibold">Workouts</span>
-                  <span className="serif block truncate text-[13px] text-muted">{plan.activeSession ? "Session in progress" : plan.workout ? `Today: ${plan.workout.name}` : "Build today's session"}</span>
+                  <span className="serif block truncate text-[13px] text-muted">{workoutSub}</span>
                 </span>
                 <ChevronRight size={16} className="text-faint" />
               </Link>
@@ -98,7 +108,7 @@ export default function PlannerPage() {
               </div>
             </div>
           )}
-          {profile.activeDomains.includes("cooking") && <Tile href="/planner/meals" icon={UtensilsCrossed} title="Meals" sub={plan.meals ? `Today: ${plan.meals.eaten}/${plan.meals.count} eaten` : mealsThisWeek ? `${mealsThisWeek} planned this week` : "No plan yet — log food anytime"} />}
+          {profile.activeDomains.includes("cooking") && <Tile href="/planner/meals" icon={UtensilsCrossed} title="Meals" sub={mealsThisWeek ? `${mealsThisWeek} meals planned this week` : "No meals planned this week"} />}
         </div>
       </section>
 
@@ -121,7 +131,7 @@ export default function PlannerPage() {
       <section>
         <SectionTitle>Food</SectionTitle>
         <div className="space-y-2.5">
-          <Tile href="/planner/pantry" icon={Package} title="Pantry" sub={pantryN ? `${pantryN} items · what can I eat tonight?` : "Add what you have"} />
+          <Tile href="/planner/pantry" icon={Package} title="Pantry" sub={pantryN ? `${pantryN} items · what can I make?` : "Add what you have"} />
           <Tile href="/recipes" icon={ChefHat} title="Recipes" sub="Search by what's in your kitchen" />
         </div>
       </section>
@@ -129,7 +139,7 @@ export default function PlannerPage() {
       <section>
         <SectionTitle>Tools</SectionTitle>
         <div className="space-y-2.5">
-          <Tile href="/coach" icon={MessageCircle} title="Coach" sub={ai ? "Ask anything about today" : "Rule-based answers (AI off)"} />
+          <Tile href="/coach" icon={MessageCircle} title="Coach" sub="Ask anything" />
           <Tile href="/planner/workout/history" icon={History} title="Workout history" sub="Edit, link or discard sessions" />
         </div>
       </section>

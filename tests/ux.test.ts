@@ -23,10 +23,15 @@ describe("health source rules", () => {
     expect(s.showManualSteps).toBe(true);
     expect(s.sleepSourceLabel).toBe("Apple Health");
   });
-  it("legacy Oura still counts as automatic so the UI never double-prompts", () => {
+  it("Oura connected supplies sleep and steps, so the UI never prompts for them", () => {
     const s = resolveHealthSources({ appleConnected: false, appleMetrics: [], appleLastSyncAt: null, ouraConnected: true });
     expect(s.showManualSleep).toBe(false);
     expect(s.showManualSteps).toBe(false);
+    expect(s.stepsSourceLabel).toBe("Oura");
+  });
+  it("with both connected, Oura is the named source", () => {
+    const s = resolveHealthSources({ appleConnected: true, appleMetrics: [{ metric: "sleep", available: true }, { metric: "steps", available: true }], appleLastSyncAt: "2026-10-13T06:00:00Z", ouraConnected: true });
+    expect(s.sleepSourceLabel).toBe("Oura");
     expect(s.stepsSourceLabel).toBe("Oura");
   });
 });

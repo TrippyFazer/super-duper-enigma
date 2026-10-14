@@ -7,6 +7,7 @@ import { parseJson, toJson } from "@/lib/json";
 import { getProfile, updateProfile } from "@/services/profile";
 import { awardXp, voidXpByKey } from "@/services/xp";
 import { buildNights, dailyPoint, dailyTotals, dayOf, mapActivityType, workoutsLikelySame } from "./aggregate";
+import { dateFrom, normalizeSample, samplesIn, workoutsIn } from "./normalize";
 import { HEALTH_METRICS, type HealthMetric, type HealthProvider, type HealthProviderStatus, type HealthSampleInput, type MetricAvailability } from "./provider";
 
 const PROVIDER = "apple_health";
@@ -110,27 +111,66 @@ export interface IngestPayload {
   bridgeVersion?: string;
 }
 
-/** Store raw samples (idempotent by uuid), then apply aggregation to the app tables. */
-export async function ingestAppleHealth(payload: IngestPayload): Promise<{ stored: number; workouts: number; applied: Record<string, number> }> {
+export interface IngestResult {
+  received: number;
+  stored: number;
+  updated: number;
+  duplicates: number;
+  /** The first 20, with why; rejectedCount has them all. */
+  rejected: { index: number; reason: string }[];
+  rejectedCount: number;
+  workouts: number;
+  applied: Record<string, number>;
+}
+
+/**
+ * Store raw samples, then apply aggregation to the app tables.
+ *
+ * With a uuid (native bridge): idempotent by uuid, as before.
+ * Without one (iOS Shortcut): keyed by type + start + end + source (+ sleep
+ * stage) — see normalize.ts. Seen before with the same value: a duplicate,
+ * ignored. Seen before with a different value: the same sample re-reported,
+ * so the value is replaced, never added to.
+ */
+export async function ingestAppleHealth(payload: IngestPayload | unknown): Promise<IngestResult> {
   const db = getDb();
+  const p = (payload && typeof payload === "object" && !Array.isArray(payload) ? payload : {}) as IngestPayload;
+  const raw = samplesIn(payload).slice(0, 20000);
+  const rejected: IngestResult["rejected"] = [];
   let stored = 0;
-  const samples = (payload.samples ?? []).filter((s) => METRIC_IDS.has(s.type) && Number.isFinite(s.value) && s.start && s.end).slice(0, 20000);
+  let updated = 0;
+  let duplicates = 0;
   const touched = new Set<ISODate>();
   const tz = getProfile().timezone;
-  for (const s of samples) {
-    const uuid = s.uuid || createHash("sha1").update(`${s.type}|${s.start}|${s.end}|${s.source ?? ""}|${s.value}`).digest("hex");
-    const r = db
-      .insert(healthSamples)
-      .values({ type: s.type, value: s.value, unit: s.unit ?? HEALTH_METRICS.find((m) => m.id === s.type)?.unit ?? "", startAt: new Date(s.start).toISOString(), endAt: new Date(s.end).toISOString(), sourceName: s.source || "unknown", sourceBundle: s.sourceBundle ?? null, device: s.device ?? null, uuid, metadata: toJson(s.metadata ?? {}) })
-      .onConflictDoNothing()
-      .run();
-    if (r.changes > 0) stored++;
-    touched.add(dayOf(s.start, tz));
-    if (s.type === "sleep") touched.add(dayOf(s.end, tz));
-  }
+  db.transaction((tx) => {
+    raw.forEach((item, index) => {
+      const n = normalizeSample(item);
+      if (!n.ok) {
+        rejected.push({ index, reason: n.reason });
+        return;
+      }
+      const s = n.sample;
+      const unit = s.unit ?? HEALTH_METRICS.find((m) => m.id === s.type)?.unit ?? "";
+      const existing = tx.select({ id: healthSamples.id, value: healthSamples.value }).from(healthSamples).where(eq(healthSamples.uuid, s.dedupeKey)).get();
+      if (!existing) {
+        tx.insert(healthSamples)
+          .values({ type: s.type, value: s.value, unit, startAt: s.start, endAt: s.end, sourceName: s.source || "unknown", sourceBundle: s.sourceBundle ?? null, device: s.device ?? null, uuid: s.dedupeKey, metadata: toJson(s.metadata ?? {}) })
+          .run();
+        stored++;
+      } else if (s.fallback && Math.abs(existing.value - s.value) > 1e-9) {
+        tx.update(healthSamples).set({ value: s.value, unit, ingestedAt: new Date().toISOString() }).where(eq(healthSamples.id, existing.id)).run();
+        updated++;
+      } else {
+        duplicates++;
+        return;
+      }
+      touched.add(dayOf(s.start, tz));
+      if (s.type === "sleep") touched.add(dayOf(s.end, tz));
+    });
+  });
   let nWorkouts = 0;
-  for (const w of (payload.workouts ?? []).slice(0, 2000)) {
-    if (!w.start || !w.end) continue;
+  for (const w of workoutsIn(payload).slice(0, 2000) as NonNullable<IngestPayload["workouts"]>) {
+    if (!w || !w.start || !w.end || !dateFrom(w.start) || !dateFrom(w.end)) continue;
     const uuid = w.uuid || createHash("sha1").update(`workout|${w.start}|${w.end}|${w.source ?? ""}`).digest("hex");
     const durationMin = Math.max(1, Math.round((new Date(w.end).getTime() - new Date(w.start).getTime()) / 60000));
     const r = db
@@ -143,10 +183,11 @@ export async function ingestAppleHealth(payload: IngestPayload): Promise<{ store
   }
   const now = new Date().toISOString();
   if (!row()) db.insert(integrations).values({ provider: PROVIDER, authType: "ingest_token", enabled: true, updatedAt: now }).onConflictDoNothing().run();
-  saveMeta({ ...(payload.permissions ? { permissions: { ...(meta().permissions ?? {}), ...payload.permissions } } : {}), ...(payload.bridge ? { bridge: payload.bridge } : {}), ...(payload.backgroundDelivery != null ? { backgroundDelivery: payload.backgroundDelivery } : {}), lastIngestAt: now, lastIngestCount: stored + nWorkouts, lastBridgeVersion: payload.bridgeVersion ?? meta().lastBridgeVersion ?? null });
-  const applied = applyHealthData({ days: touched.size ? undefined : 30, dates: [...touched] });
+  saveMeta({ ...(p.permissions ? { permissions: { ...(meta().permissions ?? {}), ...p.permissions } } : {}), ...(p.bridge ? { bridge: p.bridge } : {}), ...(p.backgroundDelivery != null ? { backgroundDelivery: p.backgroundDelivery } : {}), lastIngestAt: now, lastIngestCount: stored + updated + nWorkouts, lastBridgeVersion: p.bridgeVersion ?? meta().lastBridgeVersion ?? null });
+  // Nothing new or changed: nothing to re-apply. A re-sent payload costs one read per sample.
+  const applied = touched.size ? applyHealthData({ dates: [...touched] }) : {};
   db.update(integrations).set({ lastSyncAt: now, lastSyncStatus: "ok" }).where(eq(integrations.provider, PROVIDER)).run();
-  return { stored, workouts: nWorkouts, applied };
+  return { received: raw.length, stored, updated, duplicates, rejected: rejected.slice(0, 20), rejectedCount: rejected.length, workouts: nWorkouts, applied };
 }
 
 // -------------------------------------------------------------- apply ----

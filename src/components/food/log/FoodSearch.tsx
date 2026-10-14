@@ -42,13 +42,11 @@ export function FoodSearch({ onPick, pending, restaurantOnly, query, onQuery, pl
           <li key={h.key}>
             <button disabled={pending} onClick={() => onPick(h)} className="press flex min-h-12 w-full items-center justify-between gap-3 py-2 text-left text-sm">
               <span className="min-w-0">
-                <span className="block truncate">{h.name}</span>
-                <span className="block truncate text-[11px] text-muted">
-                  {[h.brand, h.serving, h.source === "openfoodfacts" ? "label" : h.source === "restaurant" ? "menu" : h.source].filter(Boolean).join(" · ")}
+                <span className="line-clamp-2">{h.name}</span>
+                <span className="block truncate text-[11.5px] text-muted">
+                  <span className="tabular text-text-2">{h.calories} kcal · {h.protein} g</span>
+                  {[h.brand, h.serving].filter(Boolean).map((x) => ` · ${x}`).join("")}
                 </span>
-              </span>
-              <span className="tabular shrink-0 text-right text-xs text-muted">
-                {h.calories} kcal · {h.protein} g
               </span>
             </button>
           </li>

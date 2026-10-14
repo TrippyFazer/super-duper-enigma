@@ -137,7 +137,7 @@ export function PantryScreen({ items, aiEnabled }: { items: PantryVM[]; aiEnable
               <Plus size={14} />
             </Button>
           </div>
-          {items.length === 0 && <p className="serif px-4 py-4 text-center text-[13.5px] text-muted">Empty. Rough is fine — “chicken”, “rice”, “some spinach”.</p>}
+          {items.length === 0 && <p className="serif px-4 py-4 text-center text-[13.5px] text-muted">Nothing here yet. Type what you have above.</p>}
           <ul className="divide-y divide-border/60">
             {items.map((it) => (
               <li key={it.id} className="flex items-center gap-2 px-3 py-2">

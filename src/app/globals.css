@@ -151,7 +151,8 @@ html {
   padding-left: 1rem;
   padding-right: 1rem;
   padding-top: calc(var(--safe-top) + 0.75rem);
-  padding-bottom: calc(var(--nav-height) + var(--safe-bottom) + 1.5rem);
+  /* Room for the floating + (56px, 12px above the nav) so the last row can scroll clear of it. */
+  padding-bottom: calc(var(--nav-height) + var(--safe-bottom) + 5rem);
   max-width: 40rem;
   margin-left: auto;
   margin-right: auto;

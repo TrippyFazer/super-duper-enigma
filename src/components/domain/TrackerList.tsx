@@ -55,7 +55,7 @@ export function TrackerList({ trackers, milestones }: { trackers: TrackerItem[];
   return (
     <div className="space-y-3">
       {trackers.length === 0 && (
-        <div className="card p-5 text-center text-sm text-muted">No trackers yet. Add one for anything you want to stay away from.</div>
+        <div className="card p-5 text-center text-sm text-muted">No trackers yet.</div>
       )}
       {trackers.map((t) => {
         const e = t.currentRunStart ? elapsed(t.currentRunStart, now) : null;

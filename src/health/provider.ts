@@ -8,7 +8,7 @@
  *   - ManualProvider    – the user's own logging (always available)
  *   - AppleHealthProvider – samples pushed by a native bridge / iOS Shortcut
  *                          into POST /api/health/ingest (see docs/apple-health.md)
- *   - (legacy) Oura direct API sync, kept for people without an iPhone
+ *   - Oura direct API sync — the primary source (services/autoSync.ts keeps it current)
  *
  * Nothing here fakes HealthKit: availability is derived from samples that
  * actually arrived, and every metric that has none shows as "—".

@@ -27,11 +27,11 @@ import { FeedbackProvider } from "@/components/feedback/FeedbackProvider";
 import { ServiceWorker } from "@/components/pwa/ServiceWorker";
 
 export const metadata: Metadata = {
-  title: { default: "Ascend", template: "%s · Ascend" },
+  title: { default: "TFHealth", template: "%s · TFHealth" },
   description: "Your real life, ranked E through S. A self-improvement RPG.",
-  applicationName: "Ascend",
+  applicationName: "TFHealth",
   manifest: "/manifest.webmanifest",
-  appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "Ascend" },
+  appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "TFHealth" },
   icons: {
     icon: [{ url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" }, { url: "/icons/icon-512.png", sizes: "512x512", type: "image/png" }],
     apple: [{ url: "/icons/apple-touch-icon.png", sizes: "180x180" }],

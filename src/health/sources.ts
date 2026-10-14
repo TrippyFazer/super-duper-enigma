@@ -6,11 +6,10 @@ import { getOuraStatus } from "@/integrations/oura/sync";
  * which manual logging UI should be visible.
  *
  * Rules:
- *  - Apple Health is the primary automatic source. A metric counts as
- *    "automatic" only when Apple Health has actually delivered samples for it
- *    (never because a permission was granted or a ring is paired).
- *  - Direct Oura sync is a legacy path. It still counts as an automatic source
- *    when connected, so the two never double-prompt for manual entry.
+ *  - Oura is the primary automatic source: connected, it supplies sleep and
+ *    steps (it syncs by itself, services/autoSync.ts).
+ *  - Apple Health is optional. A metric counts as coming from it only when it
+ *    has actually delivered samples (never because a permission was granted).
  *  - Manual logging is always allowed; it is only *hidden* from the default
  *    quick paths when an automatic source already covers the metric.
  */
@@ -49,8 +48,8 @@ export function resolveHealthSources(input: { appleConnected: boolean; appleMetr
     stepsAutomatic,
     showManualSleep: !sleepAutomatic,
     showManualSteps: !stepsAutomatic,
-    sleepSourceLabel: apple.sleep ? "Apple Health" : oura.connected ? "Oura" : null,
-    stepsSourceLabel: apple.steps ? "Apple Health" : oura.connected ? "Oura" : null,
+    sleepSourceLabel: oura.connected ? "Oura" : apple.sleep ? "Apple Health" : null,
+    stepsSourceLabel: oura.connected ? "Oura" : apple.steps ? "Apple Health" : null,
     anyConnected: apple.connected || oura.connected,
   };
 }

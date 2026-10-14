@@ -4,7 +4,7 @@ import { getProfile } from "@/services/profile";
 import { getQuests, reconcile } from "@/services/progression";
 import { refreshOffers } from "@/services/planner";
 import { listOffers } from "@/services/questOffers";
-import { PageHeader, SectionTitle, cx } from "@/components/ui/primitives";
+import { PageHeader, SectionTitle, cx, EmptyHint } from "@/components/ui/primitives";
 import { QuestRow } from "@/components/quests/QuestRow";
 import { UndoOfferButton } from "@/components/quests/UndoOfferButton";
 import { SpecialQuestCard } from "@/components/quests/SpecialQuestCard";
@@ -27,7 +27,13 @@ export default async function QuestsPage() {
   const q = getQuests(profile.today);
   const history = listOffers({ limit: 40 }).filter((o) => o.status !== "offered" && o.status !== "accepted");
   const dailyDone = q.daily.filter((x) => x.done).length;
-  const active = [...q.daily.filter((x) => !x.done && x.progress > 0), ...q.weekly.filter((x) => !x.done)];
+  // ACTIVE = started and not finished. Each quest appears once: what is under
+  // Active is not listed again under Daily / Weekly (it used to repeat every
+  // unfinished weekly quest twice).
+  const active = [...q.daily, ...q.weekly].filter((x) => !x.done && x.progress > 0);
+  const activeIds = new Set(active.map((x) => x.id));
+  const daily = q.daily.filter((x) => !activeIds.has(x.id));
+  const weekly = q.weekly.filter((x) => !activeIds.has(x.id));
 
   const STATUS: Record<string, { label: string; cls: string }> = { completed: { label: "Completed", cls: "text-success" }, declined: { label: "Declined", cls: "text-muted" }, expired: { label: "Expired", cls: "text-faint" } };
 
@@ -66,8 +72,8 @@ export default async function QuestsPage() {
           </span>
         </SectionTitle>
         <div className="plate divide-y divide-border/60 p-1">
-          {q.daily.length === 0 && <p className="px-4 py-6 text-center text-sm text-muted">No daily quests. Set up habits, routines or trackers to generate some.</p>}
-          {q.daily.map((x) => (
+          {daily.length === 0 && q.daily.length === 0 && <EmptyHint text="No daily quests yet." action="Add a habit" href="/domains/habits" />}
+          {daily.map((x) => (
             <QuestRow key={x.id} title={x.title} subtitle={x.description || undefined} domain={x.domain} done={x.done} progress={x.pct} progressLabel={x.target > 1 ? `${Math.min(Math.round(x.progress), x.target)}/${x.target}` : undefined} rewardXp={x.rewardXp} href={LINK[x.domain] ?? "/"} />
           ))}
         </div>
@@ -81,7 +87,7 @@ export default async function QuestsPage() {
         </SectionTitle>
         <div className="plate divide-y divide-border/60 p-1">
           {q.weekly.length === 0 && <p className="px-4 py-6 text-center text-sm text-muted">No weekly quests yet.</p>}
-          {q.weekly.map((x) => (
+          {weekly.map((x) => (
             <QuestRow key={x.id} title={x.title} subtitle={x.description || undefined} domain={x.domain} done={x.done} progress={x.pct} progressLabel={`${Math.min(Math.round(x.progress), x.target)}/${x.target}`} rewardXp={x.rewardXp} href={LINK[x.domain] ?? "/"} />
           ))}
         </div>

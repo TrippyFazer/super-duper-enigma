@@ -204,3 +204,20 @@ export function PageHeader({ title, subtitle, back, right }: { title: ReactNode;
     </header>
   );
 }
+
+/**
+ * An empty list: one short line, one obvious next step. Explanations belong
+ * behind help, not in the empty state.
+ */
+export function EmptyHint({ text, action, href, className }: { text: string; action?: string; href?: string; className?: string }) {
+  return (
+    <div className={cx("flex flex-col items-center gap-2.5 px-4 py-5 text-center", className)}>
+      <p className="text-sm text-muted">{text}</p>
+      {action && href && (
+        <Link href={href} className="press flex h-11 items-center rounded-full border border-gold/40 bg-gold/10 px-4 text-sm font-medium text-gold">
+          {action}
+        </Link>
+      )}
+    </div>
+  );
+}

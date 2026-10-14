@@ -6,12 +6,12 @@ import { Plus } from "lucide-react";
 import { LogSheet, type LogKind } from "./LogSheet";
 
 /** Routes where the global + LOG must stay out of the way (full-screen workflows). */
-const HIDDEN = ["/onboarding", "/offline", "/planner/workout/session"];
+const HIDDEN = ["/onboarding", "/offline", "/planner/workout/session", "/login"];
 
 const DEEP: Record<string, LogKind> = { "1": "workout", workout: "workout", food: "food", meal: "food", sleep: "sleep", steps: "steps", finance: "finance", routine: "routine" };
 
 /**
- * One floating "+ LOG" above the bottom nav on every tab. Not a tab itself.
+ * One floating gold "+" above the bottom nav on every tab. Not a tab itself.
  * Deep link: any page with ?log=food|workout|sleep|steps|finance|routine.
  */
 export function LogFab() {
@@ -41,12 +41,16 @@ export function LogFab() {
           setInitial(null);
           setOpen(true);
         }}
-        aria-label="Log something"
+        aria-label="Log"
+        title="Log"
         data-testid="log-fab"
-        className="press fixed right-4 z-40 flex h-14 items-center gap-1.5 rounded-full bg-gradient-to-b from-gold-2 to-gold pl-4 pr-5 text-[15px] font-semibold text-[#1a1406] shadow-[0_10px_30px_-8px_rgba(232,196,106,0.7)]"
-        style={{ bottom: "calc(var(--nav-height) + var(--safe-bottom) + 14px)" }}
+        // A gold circle rather than a "+ LOG" pill: still the brightest thing on
+        // screen and a 56px target, but it no longer covers row buttons (the
+        // Steps row's "Walk it" sat under the pill) or competes with the hero.
+        className="press fixed right-4 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-b from-gold-2 to-gold text-[#1a1406] shadow-[0_10px_28px_-8px_rgba(232,196,106,0.75)] ring-1 ring-black/20"
+        style={{ bottom: "calc(var(--nav-height) + var(--safe-bottom) + 12px)" }}
       >
-        <Plus size={20} strokeWidth={2.6} /> LOG
+        <Plus size={26} strokeWidth={2.6} />
       </button>
       <LogSheet open={open} onClose={() => setOpen(false)} initial={initial} />
     </>

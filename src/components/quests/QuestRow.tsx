@@ -26,7 +26,7 @@ export function QuestRow(p: QuestRowProps) {
         <Icon size={20} className={p.done ? "text-success" : p.tone === "special" ? "text-gold" : "text-text-2"} />
       </span>
       <span className="min-w-0 flex-1">
-        <span className={cx("block truncate text-[15px] font-medium", p.done && "text-muted line-through decoration-faint")}>{p.title}</span>
+        <span className={cx("line-clamp-2 text-[15px] font-medium leading-snug", p.done && "text-muted line-through decoration-faint")}>{p.title}</span>
         {p.subtitle && <span className="serif block truncate text-[13.5px] text-muted">{p.subtitle}</span>}
         {p.progress != null && !p.done && p.progress > 0 && (
           <span className="mt-1.5 flex items-center gap-2">

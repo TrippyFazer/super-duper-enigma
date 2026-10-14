@@ -4,11 +4,12 @@ import type { DomainAssessment } from "@/ranking/types";
 import type { ProfileView } from "@/services/profile";
 import { loadSleep } from "@/services/loaders";
 import { healthSources } from "@/health/sources";
+import { ago } from "@/lib/ago";
 import { formatMinutes, formatShort, lastNDays, minutesToHhmm } from "@/lib/dates";
 import { circularMeanMinutes, mean } from "@/ranking/scale";
 import { LogHereButton } from "@/components/log/LogHereButton";
 import { SleepChart, DayHeatmap } from "@/components/charts/Charts";
-import { Card, SectionTitle, Stat } from "@/components/ui/primitives";
+import { Card, SectionTitle, Stat, EmptyHint } from "@/components/ui/primitives";
 import { DeleteButton } from "./DeleteButton";
 import { SleepScheduleCard } from "@/components/sleep/SleepScheduleCard";
 import { compareNight, computeSleepSchedule } from "@/services/sleepPlan";
@@ -48,7 +49,10 @@ export function SleepView({ profile, range }: { profile: ProfileView; assessment
           <HeartPulse size={18} className="text-gold" />
           <div className="min-w-0 flex-1">
             <div className="text-sm font-medium">Sleep from {sources.sleepSourceLabel}</div>
-            <div className="truncate text-xs text-muted">{sources.apple.lastSyncAt ? `Last sync ${new Date(sources.apple.lastSyncAt).toLocaleString()}` : "Synced automatically"}</div>
+            <div className="truncate text-xs text-muted">{(() => {
+                const at = sources.oura.connected ? sources.oura.lastSyncAt : sources.apple.lastSyncAt;
+                return at ? `Synced ${ago(at)}` : "Syncs by itself";
+              })()}</div>
           </div>
           <Link href="/profile/settings/services" className="press flex h-10 items-center rounded-full border border-border px-3 text-xs text-text-2">
             Sources
@@ -59,7 +63,7 @@ export function SleepView({ profile, range }: { profile: ProfileView; assessment
           <LogHereButton kind="sleep" label="Log last night" />
           {!sources.anyConnected && (
             <Link href="/profile/settings/services" className="flex min-h-11 items-center gap-2 rounded-xl border border-border bg-surface px-4 py-2 text-xs text-muted">
-              <HeartPulse size={14} className="text-gold" /> Connect Apple Health to fill this in automatically.
+              <HeartPulse size={14} className="text-gold" /> Connect Oura to fill this in automatically.
             </Link>
           )}
         </>
@@ -90,7 +94,7 @@ export function SleepView({ profile, range }: { profile: ProfileView; assessment
       <Card className="p-0">
         <div className="px-4 pt-3.5 pb-2 text-sm font-semibold">Recent nights</div>
         {inRange.length === 0 ? (
-          <p className="px-4 pb-5 text-sm text-muted">No nights logged in this range.</p>
+          sources.sleepAutomatic ? <EmptyHint text="No nights yet. Oura fills this in." /> : <EmptyHint text="No nights yet." action="Log last night" href="?log=sleep" />
         ) : (
           <ul className="divide-y divide-border/70">
             {[...inRange].reverse().slice(0, 14).map((e) => (

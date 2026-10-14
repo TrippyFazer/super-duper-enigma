@@ -11,6 +11,8 @@ const { getDb } = await import("@/db/client");
 const { sleepEntries, dailyActivity, xpEvents } = await import("@/db/schema");
 const { applyOuraData, getOuraStatus } = await import("@/integrations/oura/sync");
 const { buildAuthorizeUrl, redirectUri } = await import("@/integrations/oura/client");
+const { awardXp } = await import("@/services/xp");
+const liveKeys = () => getDb().select().from(xpEvents).all().filter((x) => !x.voidedAt).map((x) => x.key);
 
 const fixture = {
   dailySleep: [{ id: "a", day: "2026-10-10", score: 82, timestamp: "2026-10-10T07:00:00+00:00" }],
@@ -30,12 +32,12 @@ beforeAll(() => {
 });
 
 describe("oura sync", () => {
-  it("upserts one sleep row per day (long sleep + naps) and activity, awarding XP once", () => {
+  it("upserts one sleep row per day (the long sleep; naps are not added) and activity, awarding XP once", () => {
     const r1 = applyOuraData(fixture as never, 450, 8000);
     expect(r1).toEqual({ nights: 1, activityDays: 1 });
     const row = getDb().select().from(sleepEntries).all()[0];
     expect(row.source).toBe("oura");
-    expect(row.totalSleepMin).toBe(Math.round((7 * 3600 + 600 + 1500) / 60));
+    expect(row.totalSleepMin).toBe(Math.round((7 * 3600 + 600) / 60));
     expect(row.sleepScore).toBe(82);
     expect(row.readinessScore).toBe(77);
     expect(row.hrv).toBe(44);
@@ -45,12 +47,22 @@ describe("oura sync", () => {
     expect(act.steps).toBe(9450);
     expect(act.activeMinutes).toBe(40);
     const xp = getDb().select().from(xpEvents).all();
-    expect(xp.map((x) => x.key).sort()).toEqual(["sleep_logged:2026-10-10", "sleep_target:2026-10-10", "steps_target:2026-10-10"]);
+    // 7h10m against a 7h30m target: missed. It used to be "hit" only because the
+    // 25-minute afternoon nap was added onto the night.
+    expect(xp.map((x) => x.key).sort()).toEqual(["sleep_logged:2026-10-10", "steps_target:2026-10-10"]);
 
     // Second sync is idempotent
     applyOuraData(fixture as never, 450, 8000);
     expect(getDb().select().from(sleepEntries).all().length).toBe(1);
-    expect(getDb().select().from(xpEvents).all().length).toBe(3);
+    expect(getDb().select().from(xpEvents).all().length).toBe(2);
+  });
+
+  it("a night re-synced below target loses the target XP it had", () => {
+    // As an earlier sync (naps added) left it: target hit and paid.
+    awardXp("sleep_target", "2026-10-10" as never, { source: { type: "sleep", id: "2026-10-10" } });
+    expect(liveKeys()).toContain("sleep_target:2026-10-10");
+    applyOuraData(fixture as never, 450, 8000);
+    expect(liveKeys()).not.toContain("sleep_target:2026-10-10");
   });
 
   it("reports status without credentials", () => {
